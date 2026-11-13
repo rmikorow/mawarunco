@@ -2930,8 +2930,11 @@ void VMManager::Internal::VSyncOnCPUThread()
 				c.ee_clears - s_prev.ee_clears, c.ee_cleared_blocks - s_prev.ee_cleared_blocks, c.ee_resets - s_prev.ee_resets,
 				c.iop_compiled - s_prev.iop_compiled, c.iop_compiled_insts - s_prev.iop_compiled_insts,
 				c.iop_clears - s_prev.iop_clears, c.iop_cleared_blocks - s_prev.iop_cleared_blocks, c.iop_resets - s_prev.iop_resets));
-			Console.WriteLn(fmt::format("RECSTATS EE: {} block discards (manual check failed), {} page resets",
-				c.ee_block_discards - s_prev.ee_block_discards, c.ee_page_resets - s_prev.ee_page_resets));
+			Console.WriteLn(fmt::format("RECSTATS EE: {} block discards (manual check failed), {} page resets, "
+				"clears by caller: mmap {} backpatch {} in-compile {}",
+				c.ee_block_discards - s_prev.ee_block_discards, c.ee_page_resets - s_prev.ee_page_resets,
+				c.ee_clear_mmap - s_prev.ee_clear_mmap, c.ee_clear_backpatch - s_prev.ee_clear_backpatch,
+				c.ee_clear_incompile - s_prev.ee_clear_incompile));
 			if (c.ee_block_discards != s_prev.ee_block_discards)
 			{
 				std::string ring;

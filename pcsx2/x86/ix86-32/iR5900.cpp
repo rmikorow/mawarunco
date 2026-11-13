@@ -2719,9 +2719,14 @@ StartRecomp:
 			if ((oldBlock->startpc + oldBlock->size * 4) <= HWADDR(startpc))
 				break;
 
-			if (memcmp(&recRAMCopy[oldBlock->startpc / 4], PSM(oldBlock->startpc),
+			// Rollback fork: recRAMCopy is a byte array covering all of RAM. Upstream indexed it with
+			// startpc / 4 while copying size * 4 bytes, so copies of neighboring blocks overwrote each
+			// other and this check reported changes that did not happen (rare upstream, constant once
+			// blocks overlap). Index it by byte address.
+			if (memcmp(&recRAMCopy[oldBlock->startpc], PSM(oldBlock->startpc),
 					oldBlock->size * 4))
 			{
+				g_recStats.ee_clear_incompile++;
 				recClear(startpc, (pc - startpc) / 4);
 				s_pCurBlockEx = recBlocks.Get(HWADDR(startpc));
 				pxAssert(s_pCurBlockEx->startpc == HWADDR(startpc));
@@ -2729,7 +2734,7 @@ StartRecomp:
 			}
 		}
 
-		memcpy(&recRAMCopy[HWADDR(startpc) / 4], PSM(startpc), pc - startpc);
+		memcpy(&recRAMCopy[HWADDR(startpc)], PSM(startpc), pc - startpc);
 	}
 
 	s_pCurBlock->SetFnptr((uptr)recPtr);

@@ -365,6 +365,7 @@ struct RecStats
 	u64 ee_compiled, ee_compiled_insts, ee_clears, ee_cleared_blocks, ee_resets;
 	u64 iop_compiled, iop_compiled_insts, iop_clears, iop_cleared_blocks, iop_resets;
 	u64 ee_block_discards, ee_page_resets;
+	u64 ee_clear_mmap, ee_clear_backpatch, ee_clear_incompile, ee_clear_cop0;
 	// most recent discarded manual blocks (ring buffer: start | size << 32)
 	u64 ee_discard_ring[64];
 	u32 ee_discard_pos;

@@ -18,6 +18,7 @@
 
 #include "Common.h"
 #include "vtlb.h"
+#include "R5900.h"
 #include "COP0.h"
 #include "Cache.h"
 #include "IopMem.h"
@@ -1130,6 +1131,7 @@ bool vtlb_BackpatchLoadStore(uptr code_address, uptr fault_address)
 		info.size_in_bits, info.is_signed, info.is_load, info.is_fpr);
 
 	// queue block for recompilation later
+	g_recStats.ee_clear_backpatch++;
 	Cpu->Clear(info.guest_pc, 1);
 
 	// and store the pc in the faulting list, so that we don't emit another fastmem loadstore
@@ -1492,6 +1494,7 @@ static __fi void mmap_ClearCpuBlock(uint offset)
 	HostSys::MemProtect(&eeMem->Main[rampage << __pageshift], __pagesize, PageAccess_ReadWrite());
 	vtlb_UpdateFastmemProtection(rampage << __pageshift, __pagesize, PageAccess_ReadWrite());
 	m_PageProtectInfo[rampage].Mode = ProtMode_Manual;
+	g_recStats.ee_clear_mmap++;
 	Cpu->Clear(m_PageProtectInfo[rampage].ReverseRamMap, __pagesize);
 }
 
