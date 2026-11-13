@@ -2914,6 +2914,27 @@ void VMManager::Internal::EntryPointCompilingOnCPUThread()
 
 void VMManager::Internal::VSyncOnCPUThread()
 {
+	// Rollback fork: periodic recompiler statistics (performance diagnostics).
+	{
+		static u32 s_stats_frames = 0;
+		static Common::Timer s_stats_timer;
+		static RecStats s_prev = {};
+		if (++s_stats_frames >= 300)
+		{
+			const double secs = s_stats_timer.GetTimeSecondsAndReset();
+			const RecStats& c = g_recStats;
+			Console.WriteLn(fmt::format(
+				"RECSTATS {:.1f} fps | EE: {} blocks ({} insts) compiled, {} clears ({} blocks), {} resets | "
+				"IOP: {} blocks ({} insts) compiled, {} clears ({} blocks), {} resets",
+				s_stats_frames / secs, c.ee_compiled - s_prev.ee_compiled, c.ee_compiled_insts - s_prev.ee_compiled_insts,
+				c.ee_clears - s_prev.ee_clears, c.ee_cleared_blocks - s_prev.ee_cleared_blocks, c.ee_resets - s_prev.ee_resets,
+				c.iop_compiled - s_prev.iop_compiled, c.iop_compiled_insts - s_prev.iop_compiled_insts,
+				c.iop_clears - s_prev.iop_clears, c.iop_cleared_blocks - s_prev.iop_cleared_blocks, c.iop_resets - s_prev.iop_resets));
+			s_prev = c;
+			s_stats_frames = 0;
+		}
+	}
+
 	Pad::UpdateMacroButtons();
 
 	Patch::ApplyVsyncPatches();

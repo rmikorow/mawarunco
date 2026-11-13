@@ -58,6 +58,7 @@ uptr g_argPtrs[kMaxArgs];
 #define DEBUG_LAUNCHARG 0 // show lots of helpful console messages as the launch arguments are passed to the game
 
 u32 g_eeCycleFrac = 0;
+RecStats g_recStats = {};
 
 void cpuReset()
 {

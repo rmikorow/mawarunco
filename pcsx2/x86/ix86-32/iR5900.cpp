@@ -649,6 +649,7 @@ alignas(16) static u8 manual_counter[Ps2MemSize::TotalRam >> 12];
 static void recResetRaw()
 {
 	Console.WriteLn(Color_StrongBlack, "EE/iR5900 Recompiler Reset");
+	g_recStats.ee_resets++;
 	s_deterministicBlocks = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "DeterministicEEBlocks", true);
 
 	if (CHECK_EXTRAMEM != extraRam)
@@ -815,6 +816,7 @@ void R5900::Dynarec::OpcodeImpl::recBREAK()
 // Size is in dwords (4 bytes)
 void recClear(u32 addr, u32 size)
 {
+	g_recStats.ee_clears++;
 	if ((addr) >= maxrecmem || !(recLUT[(addr) >> 16] + (addr & ~0xFFFFUL)))
 		return;
 	addr = HWADDR(addr);
@@ -848,6 +850,7 @@ void recClear(u32 addr, u32 size)
 
 		pblock->SetFnptr((uptr)JITCompile);
 		recBlocks.Remove(blockidx, blockidx);
+		g_recStats.ee_cleared_blocks++;
 	}
 
 	for (int i = 0; (pexblock = recBlocks[i]); i++)
@@ -2248,6 +2251,7 @@ static void recRecompile(const u32 startpc)
 	pxAssert(!s_pCurBlockEx || s_pCurBlockEx->startpc != HWADDR(startpc));
 
 	s_pCurBlockEx = recBlocks.New(HWADDR(startpc), (uptr)recPtr);
+	g_recStats.ee_compiled++;
 
 	pxAssert(s_pCurBlockEx);
 
@@ -2782,6 +2786,7 @@ StartRecomp:
 	pxAssert(xGetPtr() < SysMemory::GetEERecEnd());
 
 	s_pCurBlockEx->x86size = static_cast<u32>(xGetPtr() - recPtr);
+	g_recStats.ee_compiled_insts += (pc - startpc) / 4;
 
 #if 0
 	// Example: Dump both x86/EE code

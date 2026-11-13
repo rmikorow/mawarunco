@@ -960,6 +960,7 @@ static void recReserve()
 void recResetIOP()
 {
 	DevCon.WriteLn("iR3000A Recompiler reset.");
+	g_recStats.iop_resets++;
 	s_deterministicBlocks = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "DeterministicIOPBlocks", true);
 
 	if (CHECK_EXTRAMEM != extraRam)
@@ -1132,7 +1133,9 @@ static __fi u32 psxRecClearMem(u32 pc)
 	if (toRemoveFirst != blockidx)
 	{
 		recBlocks.Remove(toRemoveFirst, (blockidx - 1));
+		g_recStats.iop_cleared_blocks += blockidx - toRemoveFirst;
 	}
+	g_recStats.iop_clears++;
 
 	blockidx = 0;
 	while (BASEBLOCKEX* pexblock = recBlocks[blockidx++])
@@ -1676,6 +1679,7 @@ static void iopRecRecompile(const u32 startpc)
 
 	if (!s_pCurBlockEx || s_pCurBlockEx->startpc != HWADDR(startpc))
 		s_pCurBlockEx = recBlocks.New(HWADDR(startpc), (uptr)recPtr);
+		g_recStats.iop_compiled++;
 
 	psxbranch = 0;
 
@@ -1851,6 +1855,7 @@ StartRecomp:
 
 	pxAssert(xGetPtr() - recPtr < _64kb);
 	s_pCurBlockEx->x86size = xGetPtr() - recPtr;
+	g_recStats.iop_compiled_insts += (psxpc - s_pCurBlockEx->startpc) / 4;
 
 	Perf::iop.RegisterPC((void*)s_pCurBlockEx->fnptr, s_pCurBlockEx->x86size, s_pCurBlockEx->startpc);
 

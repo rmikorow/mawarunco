@@ -358,6 +358,14 @@ extern R5900cpu *Cpu;
 // cycle count does not depend on where blocks are split (which depends on compile history).
 // Not part of the savestate format: reset to 0 on state load, rollback snapshots carry it.
 extern u32 g_eeCycleFrac;
+
+// Rollback fork: recompiler statistics for performance diagnostics (logged periodically).
+struct RecStats
+{
+	u64 ee_compiled, ee_compiled_insts, ee_clears, ee_cleared_blocks, ee_resets;
+	u64 iop_compiled, iop_compiled_insts, iop_clears, iop_cleared_blocks, iop_resets;
+};
+extern RecStats g_recStats;
 extern R5900cpu intCpu;
 extern R5900cpu recCpu;
 
