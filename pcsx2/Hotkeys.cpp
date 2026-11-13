@@ -268,6 +268,11 @@ DEFINE_HOTKEY("RollbackSelfTest", TRANSLATE_NOOP("Hotkeys", "System"),
 		if (!pressed && VMManager::HasValidVM())
 			RollbackTest::Request(120);
 	})
+DEFINE_HOTKEY("RollbackSelfTestReloadBoth", TRANSLATE_NOOP("Hotkeys", "System"),
+	TRANSLATE_NOOP("Hotkeys", "Rollback Self-Test, restore in both passes (diagnostic)"), [](s32 pressed) {
+		if (!pressed && VMManager::HasValidVM())
+			RollbackTest::Request(120, true);
+	})
 DEFINE_HOTKEY("PreviousSaveStateSlot", TRANSLATE_NOOP("Hotkeys", "Save States"),
 	TRANSLATE_NOOP("Hotkeys", "Select Previous Save Slot"), [](s32 pressed) {
 		if (!pressed && VMManager::HasValidVM())

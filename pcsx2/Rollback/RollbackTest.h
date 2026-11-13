@@ -16,7 +16,8 @@
 namespace RollbackTest
 {
 	/// Requests a test over the given number of frames. Starts at the next input poll.
-	void Request(u32 frames);
+	/// reload_start (diagnostic): restore S0 right after taking it in the recording pass too.
+	void Request(u32 frames, bool reload_start = false);
 
 	/// Called from VMManager::Internal::PollInputOnCPUThread after the pads have been polled.
 	/// Records or overrides the pad input and requests a CPU loop exit.

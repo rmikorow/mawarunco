@@ -50,6 +50,7 @@ namespace RollbackTest
 
 	static u32 s_test_index = 0;
 	static bool s_exit_pending = false;
+	static bool s_reload_start = false; // diagnostic: restore S0 in the recording pass too
 
 	// Per-frame fingerprint, taken right after the input poll. Used to find the first diverging frame.
 	struct FrameTrace
@@ -77,7 +78,7 @@ namespace RollbackTest
 	static bool CompareSnapshots(const ArchiveEntryList& a, const ArchiveEntryList& b);
 } // namespace RollbackTest
 
-void RollbackTest::Request(u32 frames)
+void RollbackTest::Request(u32 frames, bool reload_start)
 {
 	if (s_phase != Phase::Idle)
 	{
@@ -87,6 +88,7 @@ void RollbackTest::Request(u32 frames)
 	}
 
 	s_requested_frames = frames;
+	s_reload_start = reload_start;
 }
 
 void RollbackTest::Abort()
@@ -230,8 +232,22 @@ void RollbackTest::OnExecutionExited()
 				return;
 			}
 
-			Console.WriteLn(fmt::format("Rollback test: recording {} frames (snapshot {:.2f} ms, {} bytes)",
-				s_num_frames, s_save_ms, s_start_state->GetBuffer().size()));
+			Console.WriteLn(fmt::format("Rollback test: recording {} frames (snapshot {:.2f} ms, {} bytes){}",
+				s_num_frames, s_save_ms, s_start_state->GetBuffer().size(),
+				s_reload_start ? ", S0 restored in both passes" : ""));
+
+			if (s_reload_start)
+			{
+				// Diagnostic: make the recording pass go through the same restore as the replay pass.
+				// If this makes the test pass, restoring a state has a side effect on emulation.
+				Error error;
+				if (!SaveState_LoadFromMemory(*s_start_state, &error))
+				{
+					Console.Error(fmt::format("Rollback test: restore failed: {}", error.GetDescription()));
+					Finish();
+					return;
+				}
+			}
 			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_CIRCLE_DOT,
 				fmt::format("Rollback test: recording {} frames...", s_num_frames), Host::OSD_INFO_DURATION);
 		}
@@ -288,8 +304,8 @@ void RollbackTest::OnExecutionExited()
 		Console.WriteLn(fmt::format("Rollback test: {} of {} frames diverged during replay",
 			s_trace_mismatches, s_num_frames + 1));
 		const bool same = CompareSnapshots(*s_end_state, *replay_state);
-		const std::string msg = fmt::format("Rollback test over {} frames: {} (save {:.1f} ms, load {:.1f} ms)",
-			s_num_frames, same ? "IDENTICAL" : "MISMATCH", s_save_ms, s_load_ms);
+		const std::string msg = fmt::format("Rollback test{} over {} frames: {} (save {:.1f} ms, load {:.1f} ms)",
+			s_reload_start ? " (reload both)" : "", s_num_frames, same ? "IDENTICAL" : "MISMATCH", s_save_ms, s_load_ms);
 		Console.WriteLn(same ? Color_Green : Color_Red, msg);
 		Host::AddIconOSDMessage(OSD_KEY, same ? ICON_FA_CHECK : ICON_FA_TRIANGLE_EXCLAMATION, msg,
 			Host::OSD_ERROR_DURATION);
