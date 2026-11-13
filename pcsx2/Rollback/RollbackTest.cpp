@@ -22,6 +22,7 @@
 
 #include <cstring>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace RollbackTest
@@ -48,6 +49,7 @@ namespace RollbackTest
 	static double s_load_ms = 0.0;
 
 	static u32 s_test_index = 0;
+	static bool s_exit_pending = false;
 
 	// Per-frame fingerprint, taken right after the input poll. Used to find the first diverging frame.
 	struct FrameTrace
@@ -102,6 +104,7 @@ void RollbackTest::Finish()
 {
 	s_phase = Phase::Idle;
 	s_requested_frames = 0;
+	s_exit_pending = false;
 	s_start_state.reset();
 	s_end_state.reset();
 	s_inputs.clear();
@@ -164,29 +167,60 @@ std::unique_ptr<ArchiveEntryList> RollbackTest::TakeSnapshot(double* ms)
 
 void RollbackTest::OnInputPolled()
 {
-	switch (s_phase)
+	if (s_phase == Phase::Idle)
 	{
-		case Phase::Idle:
+		if (s_requested_frames == 0)
+			return;
+
+		if (EmuConfig.Speedhacks.vuThread)
 		{
-			if (s_requested_frames == 0)
-				return;
+			// MTVU runs VU1 on a host thread, so its timing is not deterministic.
+			Host::AddIconOSDMessage("RollbackTestMTVU", ICON_FA_TRIANGLE_EXCLAMATION,
+				"Rollback test: MTVU is enabled, results are not meaningful.", Host::OSD_WARNING_DURATION);
+		}
 
-			if (EmuConfig.Speedhacks.vuThread)
-			{
-				// MTVU runs VU1 on a host thread, so its timing is not deterministic.
-				Host::AddIconOSDMessage("RollbackTestMTVU", ICON_FA_TRIANGLE_EXCLAMATION,
-					"Rollback test: MTVU is enabled, results are not meaningful.", Host::OSD_WARNING_DURATION);
-			}
+		s_num_frames = s_requested_frames;
+		s_requested_frames = 0;
+		s_frame = 0;
+		s_inputs.clear();
+		s_inputs.reserve((s_num_frames + 1) * NUM_PORTS);
+		s_trace.clear();
+		s_trace.reserve(s_num_frames + 1);
+		s_trace_mismatches = 0;
+		s_phase = Phase::Recording;
+	}
 
-			s_num_frames = s_requested_frames;
-			s_requested_frames = 0;
-			s_frame = 0;
-			s_inputs.clear();
-			s_inputs.reserve((s_num_frames + 1) * NUM_PORTS);
-			s_trace.clear();
-			s_trace.reserve(s_num_frames + 1);
-			s_trace_mismatches = 0;
+	// Only the input is handled here. Snapshots and restores must not happen in the middle of the
+	// vsync event: the counters are half-updated and callers hold state in locals. They are done in
+	// OnExecutionExited(), after the event test has completed.
+	if (s_phase == Phase::Recording)
+	{
+		// Input for the frame that starts now. Frame s_num_frames is recorded too, because the
+		// pad state at the end point is part of the end snapshot.
+		for (u32 port = 0; port < NUM_PORTS; port++)
+			s_inputs.emplace_back(static_cast<int>(port), 0);
+	}
+	else
+	{
+		for (u32 port = 0; port < NUM_PORTS; port++)
+			s_inputs[s_frame * NUM_PORTS + port].OverrideActualController();
+	}
 
+	// Leave the CPU loop once the current event test has finished. This is requested on every
+	// frame of both passes, so recording and replay take exactly the same path.
+	s_exit_pending = true;
+	Cpu->ExitExecution();
+}
+
+void RollbackTest::OnExecutionExited()
+{
+	if (!std::exchange(s_exit_pending, false) || s_phase == Phase::Idle)
+		return;
+
+	if (s_phase == Phase::Recording)
+	{
+		if (s_frame == 0)
+		{
 			s_start_state = TakeSnapshot(&s_save_ms);
 			if (!s_start_state)
 			{
@@ -200,82 +234,68 @@ void RollbackTest::OnInputPolled()
 				s_num_frames, s_save_ms, s_start_state->GetBuffer().size()));
 			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_CIRCLE_DOT,
 				fmt::format("Rollback test: recording {} frames...", s_num_frames), Host::OSD_INFO_DURATION);
-			s_phase = Phase::Recording;
-			[[fallthrough]];
 		}
 
-		case Phase::Recording:
+		s_trace.push_back(TakeTrace());
+
+		if (s_frame < s_num_frames)
 		{
-			// Input for the frame that starts now. Frame s_num_frames is recorded too, because the
-			// pad state at the end point is part of the end snapshot.
-			for (u32 port = 0; port < NUM_PORTS; port++)
-				s_inputs.emplace_back(static_cast<int>(port), 0);
-			s_trace.push_back(TakeTrace());
-
-			if (s_frame < s_num_frames)
-			{
-				s_frame++;
-				return;
-			}
-
-			double end_ms;
-			s_end_state = TakeSnapshot(&end_ms);
-			if (!s_end_state)
-			{
-				Finish();
-				return;
-			}
-
-			// Restore S0. This happens at the same point of the vsync where S0 was taken, so the
-			// rest of this vsync runs exactly as it did after the original snapshot.
-			Common::Timer timer;
-			Error error;
-			if (!SaveState_LoadFromMemory(*s_start_state, &error))
-			{
-				Console.Error(fmt::format("Rollback test: restore failed: {}", error.GetDescription()));
-				Host::AddIconOSDMessage(OSD_KEY, ICON_FA_TRIANGLE_EXCLAMATION,
-					fmt::format("Rollback test: restore failed: {}", error.GetDescription()), Host::OSD_ERROR_DURATION);
-				Finish();
-				return;
-			}
-			s_load_ms = timer.GetTimeMilliseconds();
-
-			Console.WriteLn(fmt::format("Rollback test: restored S0 in {:.2f} ms, replaying", s_load_ms));
-			s_phase = Phase::Replaying;
-			s_frame = 0;
-			[[fallthrough]];
+			s_frame++;
+			return;
 		}
 
-		case Phase::Replaying:
+		double end_ms;
+		s_end_state = TakeSnapshot(&end_ms);
+		if (!s_end_state)
 		{
-			for (u32 port = 0; port < NUM_PORTS; port++)
-				s_inputs[s_frame * NUM_PORTS + port].OverrideActualController();
-			CheckTrace();
-
-			if (s_frame < s_num_frames)
-			{
-				s_frame++;
-				return;
-			}
-
-			double replay_ms;
-			std::unique_ptr<ArchiveEntryList> replay_state = TakeSnapshot(&replay_ms);
-			if (replay_state)
-			{
-				Console.WriteLn(fmt::format("Rollback test: {} of {} frames diverged during replay",
-					s_trace_mismatches, s_num_frames + 1));
-				const bool same = CompareSnapshots(*s_end_state, *replay_state);
-				const std::string msg = fmt::format("Rollback test over {} frames: {} (save {:.1f} ms, load {:.1f} ms)",
-					s_num_frames, same ? "IDENTICAL" : "MISMATCH", s_save_ms, s_load_ms);
-				Console.WriteLn(same ? Color_Green : Color_Red, msg);
-				Host::AddIconOSDMessage(OSD_KEY, same ? ICON_FA_CHECK : ICON_FA_TRIANGLE_EXCLAMATION, msg,
-					Host::OSD_ERROR_DURATION);
-			}
-
 			Finish();
 			return;
 		}
+
+		Common::Timer timer;
+		Error error;
+		if (!SaveState_LoadFromMemory(*s_start_state, &error))
+		{
+			Console.Error(fmt::format("Rollback test: restore failed: {}", error.GetDescription()));
+			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_TRIANGLE_EXCLAMATION,
+				fmt::format("Rollback test: restore failed: {}", error.GetDescription()), Host::OSD_ERROR_DURATION);
+			Finish();
+			return;
+		}
+		s_load_ms = timer.GetTimeMilliseconds();
+		Console.WriteLn(fmt::format("Rollback test: restored S0 in {:.2f} ms, replaying", s_load_ms));
+
+		// Frame 0 of the replay is the restored S0 itself. The input for frame 0 is part of S0.
+		s_phase = Phase::Replaying;
+		s_frame = 0;
+		CheckTrace();
+		s_frame = 1;
+		return;
 	}
+
+	// Replaying
+	CheckTrace();
+	if (s_frame < s_num_frames)
+	{
+		s_frame++;
+		return;
+	}
+
+	double replay_ms;
+	std::unique_ptr<ArchiveEntryList> replay_state = TakeSnapshot(&replay_ms);
+	if (replay_state)
+	{
+		Console.WriteLn(fmt::format("Rollback test: {} of {} frames diverged during replay",
+			s_trace_mismatches, s_num_frames + 1));
+		const bool same = CompareSnapshots(*s_end_state, *replay_state);
+		const std::string msg = fmt::format("Rollback test over {} frames: {} (save {:.1f} ms, load {:.1f} ms)",
+			s_num_frames, same ? "IDENTICAL" : "MISMATCH", s_save_ms, s_load_ms);
+		Console.WriteLn(same ? Color_Green : Color_Red, msg);
+		Host::AddIconOSDMessage(OSD_KEY, same ? ICON_FA_CHECK : ICON_FA_TRIANGLE_EXCLAMATION, msg,
+			Host::OSD_ERROR_DURATION);
+	}
+
+	Finish();
 }
 
 // Writes a differing component to <logs>/rollback/test<N>_<tag>_<name> for offline diffing.

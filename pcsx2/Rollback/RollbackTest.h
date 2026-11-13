@@ -12,14 +12,19 @@
 // 3. Take snapshot S_N' and compare it with S_N, component by component.
 //
 // If emulation is deterministic, S_N and S_N' are identical. All work happens on the
-// CPU thread at the input poll point of every vsync.
+// CPU thread: input at the input poll point of every vsync, snapshots after the CPU loop exits.
 namespace RollbackTest
 {
 	/// Requests a test over the given number of frames. Starts at the next input poll.
 	void Request(u32 frames);
 
 	/// Called from VMManager::Internal::PollInputOnCPUThread after the pads have been polled.
+	/// Records or overrides the pad input and requests a CPU loop exit.
 	void OnInputPolled();
+
+	/// Called from VMManager::Execute after the CPU loop has exited. Snapshots and restores happen
+	/// here, where the event test has completed and the state is consistent.
+	void OnExecutionExited();
 
 	/// Cancels a running test (state load, reset, shutdown).
 	void Abort();

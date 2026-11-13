@@ -2766,6 +2766,9 @@ void VMManager::Execute()
 
 	// Execute until we're asked to stop.
 	Cpu->Execute();
+
+	// Rollback self-test: snapshots and restores happen here, outside of the CPU loop.
+	RollbackTest::OnExecutionExited();
 }
 
 void VMManager::IdlePollUpdate()
