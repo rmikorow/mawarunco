@@ -6,6 +6,9 @@
 #include "Config.h"
 #include "Host.h"
 #include "IconsFontAwesome.h"
+#include "MemoryTypes.h"
+#include "R3000A.h"
+#include "R5900.h"
 #include "Recording/PadData.h"
 #include "SaveState.h"
 
@@ -46,6 +49,26 @@ namespace RollbackTest
 
 	static u32 s_test_index = 0;
 
+	// Per-frame fingerprint, taken right after the input poll. Used to find the first diverging frame.
+	struct FrameTrace
+	{
+		u64 ee_cycle;
+		u64 iop_cycle;
+		u64 ee_hash;
+		u64 iop_hash;
+
+		bool operator==(const FrameTrace& o) const
+		{
+			return ee_cycle == o.ee_cycle && iop_cycle == o.iop_cycle && ee_hash == o.ee_hash && iop_hash == o.iop_hash;
+		}
+	};
+	static std::vector<FrameTrace> s_trace;
+	static u32 s_trace_mismatches = 0;
+
+	static u64 HashMemory(const u8* data, size_t size);
+	static FrameTrace TakeTrace();
+	static void CheckTrace();
+
 	static void Finish();
 	static void DumpEntry(const char* tag, const std::string& name, const u8* data, u32 size);
 	static std::unique_ptr<ArchiveEntryList> TakeSnapshot(double* ms);
@@ -83,6 +106,49 @@ void RollbackTest::Finish()
 	s_end_state.reset();
 	s_inputs.clear();
 	s_inputs.shrink_to_fit();
+	s_trace.clear();
+	s_trace.shrink_to_fit();
+}
+
+u64 RollbackTest::HashMemory(const u8* data, size_t size)
+{
+	// FNV-1a style over 64-bit words. Fast enough for a debug check, not cryptographic.
+	u64 h = 0xcbf29ce484222325ull;
+	const size_t words = size / sizeof(u64);
+	for (size_t i = 0; i < words; i++)
+	{
+		u64 w;
+		std::memcpy(&w, data + i * sizeof(u64), sizeof(w));
+		h = (h ^ w) * 0x100000001b3ull;
+	}
+	return h;
+}
+
+RollbackTest::FrameTrace RollbackTest::TakeTrace()
+{
+	return FrameTrace{
+		cpuRegs.cycle,
+		psxRegs.cycle,
+		HashMemory(eeMem->Main, Ps2MemSize::ExposedRam),
+		HashMemory(iopMem->Main, Ps2MemSize::ExposedIopRam),
+	};
+}
+
+// Replay phase: compares the current frame with the recorded one and logs the first divergences.
+void RollbackTest::CheckTrace()
+{
+	const FrameTrace now = TakeTrace();
+	const FrameTrace& rec = s_trace[s_frame];
+	if (now == rec)
+		return;
+
+	if (s_trace_mismatches++ < 8)
+	{
+		Console.Error(fmt::format("  frame {}: ee_cycle {} vs {} ({:+}), iop_cycle {} vs {} ({:+}), ee_ram {}, iop_ram {}",
+			s_frame, rec.ee_cycle, now.ee_cycle, static_cast<s64>(now.ee_cycle - rec.ee_cycle),
+			rec.iop_cycle, now.iop_cycle, static_cast<s64>(now.iop_cycle - rec.iop_cycle),
+			rec.ee_hash == now.ee_hash ? "same" : "DIFF", rec.iop_hash == now.iop_hash ? "same" : "DIFF"));
+	}
 }
 
 std::unique_ptr<ArchiveEntryList> RollbackTest::TakeSnapshot(double* ms)
@@ -117,6 +183,9 @@ void RollbackTest::OnInputPolled()
 			s_frame = 0;
 			s_inputs.clear();
 			s_inputs.reserve((s_num_frames + 1) * NUM_PORTS);
+			s_trace.clear();
+			s_trace.reserve(s_num_frames + 1);
+			s_trace_mismatches = 0;
 
 			s_start_state = TakeSnapshot(&s_save_ms);
 			if (!s_start_state)
@@ -141,6 +210,7 @@ void RollbackTest::OnInputPolled()
 			// pad state at the end point is part of the end snapshot.
 			for (u32 port = 0; port < NUM_PORTS; port++)
 				s_inputs.emplace_back(static_cast<int>(port), 0);
+			s_trace.push_back(TakeTrace());
 
 			if (s_frame < s_num_frames)
 			{
@@ -180,6 +250,7 @@ void RollbackTest::OnInputPolled()
 		{
 			for (u32 port = 0; port < NUM_PORTS; port++)
 				s_inputs[s_frame * NUM_PORTS + port].OverrideActualController();
+			CheckTrace();
 
 			if (s_frame < s_num_frames)
 			{
@@ -191,6 +262,8 @@ void RollbackTest::OnInputPolled()
 			std::unique_ptr<ArchiveEntryList> replay_state = TakeSnapshot(&replay_ms);
 			if (replay_state)
 			{
+				Console.WriteLn(fmt::format("Rollback test: {} of {} frames diverged during replay",
+					s_trace_mismatches, s_num_frames + 1));
 				const bool same = CompareSnapshots(*s_end_state, *replay_state);
 				const std::string msg = fmt::format("Rollback test over {} frames: {} (save {:.1f} ms, load {:.1f} ms)",
 					s_num_frames, same ? "IDENTICAL" : "MISMATCH", s_save_ms, s_load_ms);
