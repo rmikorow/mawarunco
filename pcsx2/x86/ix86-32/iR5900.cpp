@@ -2052,6 +2052,8 @@ static void PreBlockCheck(u32 blockpc)
 //  less likely, self-modifying code)
 void dyna_block_discard(u32 start, u32 sz)
 {
+	g_recStats.ee_block_discards++;
+	g_recStats.ee_discard_ring[g_recStats.ee_discard_pos++ & 63] = start | (static_cast<u64>(sz) << 32);
 	eeRecPerfLog.Write(Color_StrongGray, "Clearing Manual Block @ 0x%08X  [size=%d]", start, sz * 4);
 	recClear(start, sz);
 }
@@ -2061,6 +2063,7 @@ void dyna_block_discard(u32 start, u32 sz)
 // and the block is re-assigned for write protection.
 void dyna_page_reset(u32 start, u32 sz)
 {
+	g_recStats.ee_page_resets++;
 	recClear(start & ~0xfffUL, 0x400);
 	manual_counter[start >> 12]++;
 	mmap_MarkCountedRamPage(start);

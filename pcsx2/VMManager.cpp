@@ -2930,6 +2930,18 @@ void VMManager::Internal::VSyncOnCPUThread()
 				c.ee_clears - s_prev.ee_clears, c.ee_cleared_blocks - s_prev.ee_cleared_blocks, c.ee_resets - s_prev.ee_resets,
 				c.iop_compiled - s_prev.iop_compiled, c.iop_compiled_insts - s_prev.iop_compiled_insts,
 				c.iop_clears - s_prev.iop_clears, c.iop_cleared_blocks - s_prev.iop_cleared_blocks, c.iop_resets - s_prev.iop_resets));
+			Console.WriteLn(fmt::format("RECSTATS EE: {} block discards (manual check failed), {} page resets",
+				c.ee_block_discards - s_prev.ee_block_discards, c.ee_page_resets - s_prev.ee_page_resets));
+			if (c.ee_block_discards != s_prev.ee_block_discards)
+			{
+				std::string ring;
+				for (u32 i = 0; i < 16; i++)
+				{
+					const u64 e = c.ee_discard_ring[(c.ee_discard_pos - 1 - i) & 63];
+					ring += fmt::format(" {:08x}/{}", static_cast<u32>(e), static_cast<u32>(e >> 32));
+				}
+				Console.WriteLn(fmt::format("RECSTATS EE recent discards (start/words):{}", ring));
+			}
 			s_prev = c;
 			s_stats_frames = 0;
 		}

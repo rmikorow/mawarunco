@@ -364,6 +364,10 @@ struct RecStats
 {
 	u64 ee_compiled, ee_compiled_insts, ee_clears, ee_cleared_blocks, ee_resets;
 	u64 iop_compiled, iop_compiled_insts, iop_clears, iop_cleared_blocks, iop_resets;
+	u64 ee_block_discards, ee_page_resets;
+	// most recent discarded manual blocks (ring buffer: start | size << 32)
+	u64 ee_discard_ring[64];
+	u32 ee_discard_pos;
 };
 extern RecStats g_recStats;
 extern R5900cpu intCpu;
