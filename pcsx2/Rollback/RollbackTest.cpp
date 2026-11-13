@@ -3,6 +3,7 @@
 
 #include "Rollback/RollbackTest.h"
 
+#include "Config.h"
 #include "Host.h"
 #include "IconsFontAwesome.h"
 #include "Recording/PadData.h"
@@ -10,6 +11,8 @@
 
 #include "common/Console.h"
 #include "common/Error.h"
+#include "common/FileSystem.h"
+#include "common/Path.h"
 #include "common/Timer.h"
 
 #include "fmt/format.h"
@@ -41,7 +44,10 @@ namespace RollbackTest
 	static double s_save_ms = 0.0;
 	static double s_load_ms = 0.0;
 
+	static u32 s_test_index = 0;
+
 	static void Finish();
+	static void DumpEntry(const char* tag, const std::string& name, const u8* data, u32 size);
 	static std::unique_ptr<ArchiveEntryList> TakeSnapshot(double* ms);
 	static bool CompareSnapshots(const ArchiveEntryList& a, const ArchiveEntryList& b);
 } // namespace RollbackTest
@@ -98,6 +104,13 @@ void RollbackTest::OnInputPolled()
 		{
 			if (s_requested_frames == 0)
 				return;
+
+			if (EmuConfig.Speedhacks.vuThread)
+			{
+				// MTVU runs VU1 on a host thread, so its timing is not deterministic.
+				Host::AddIconOSDMessage("RollbackTestMTVU", ICON_FA_TRIANGLE_EXCLAMATION,
+					"Rollback test: MTVU is enabled, results are not meaningful.", Host::OSD_WARNING_DURATION);
+			}
 
 			s_num_frames = s_requested_frames;
 			s_requested_frames = 0;
@@ -192,8 +205,22 @@ void RollbackTest::OnInputPolled()
 	}
 }
 
+// Writes a differing component to <logs>/rollback/test<N>_<tag>_<name> for offline diffing.
+void RollbackTest::DumpEntry(const char* tag, const std::string& name, const u8* data, u32 size)
+{
+	const std::string dir = Path::Combine(EmuFolders::Logs, "rollback");
+	if (!FileSystem::EnsureDirectoryExists(dir.c_str(), true))
+		return;
+
+	const std::string path = Path::Combine(dir, fmt::format("test{}_{}_{}", s_test_index, tag, name));
+	if (!FileSystem::WriteBinaryFile(path.c_str(), data, size))
+		Console.Error(fmt::format("Rollback test: failed to write {}", path));
+}
+
 bool RollbackTest::CompareSnapshots(const ArchiveEntryList& a, const ArchiveEntryList& b)
 {
+	s_test_index++;
+
 	if (a.GetLength() != b.GetLength())
 	{
 		Console.Error("Rollback test: snapshots have a different number of entries.");
@@ -211,6 +238,8 @@ bool RollbackTest::CompareSnapshots(const ArchiveEntryList& a, const ArchiveEntr
 		if (ea.GetDataSize() != eb.GetDataSize())
 		{
 			Console.Error(fmt::format("  {}: size differs ({} vs {})", ea.GetFilename(), ea.GetDataSize(), eb.GetDataSize()));
+			DumpEntry("record", ea.GetFilename(), pa, ea.GetDataSize());
+			DumpEntry("replay", eb.GetFilename(), pb, eb.GetDataSize());
 			all_same = false;
 			continue;
 		}
@@ -237,6 +266,8 @@ bool RollbackTest::CompareSnapshots(const ArchiveEntryList& a, const ArchiveEntr
 		}
 		Console.Error(fmt::format("  {}: {} of {} bytes differ, first at 0x{:x}, last at 0x{:x}",
 			ea.GetFilename(), diff_bytes, size, first, last));
+		DumpEntry("record", ea.GetFilename(), pa, size);
+		DumpEntry("replay", eb.GetFilename(), pb, size);
 
 		// Detail for EE RAM: list the first differing 16-byte lines (offset = PS2 physical address).
 		if (ea.GetFilename() == "eeMemory.bin")
