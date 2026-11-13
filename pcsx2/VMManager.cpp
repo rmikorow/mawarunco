@@ -2764,6 +2764,9 @@ void VMManager::Execute()
 		vtlb_ResetFastmem();
 	}
 
+	// Rollback self-test: keep the pad state of the current frame, host events may have changed it.
+	RollbackTest::OnBeforeExecute();
+
 	// Execute until we're asked to stop.
 	Cpu->Execute();
 

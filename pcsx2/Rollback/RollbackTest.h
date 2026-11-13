@@ -23,6 +23,10 @@ namespace RollbackTest
 	/// Records or overrides the pad input and requests a CPU loop exit.
 	void OnInputPolled();
 
+	/// Called from VMManager::Execute before the CPU loop is entered. Re-applies the pad state of
+	/// the current frame, because host input events may have changed it since the poll.
+	void OnBeforeExecute();
+
 	/// Called from VMManager::Execute after the CPU loop has exited. Snapshots and restores happen
 	/// here, where the event test has completed and the state is consistent.
 	void OnExecutionExited();
