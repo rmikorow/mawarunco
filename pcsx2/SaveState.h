@@ -59,6 +59,8 @@ extern bool SaveState_ZipToDisk(
 	const char* filename, Error* error);
 extern bool SaveState_ReadScreenshot(const std::string& filename, u32* out_width, u32* out_height, std::vector<u32>* out_pixels);
 extern bool SaveState_UnzipFromDisk(const std::string& filename, Error* error);
+// Rollback: loads a state produced by SaveState_DownloadState directly from memory.
+extern bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error);
 
 // --------------------------------------------------------------------------------------
 //  SaveStateBase class

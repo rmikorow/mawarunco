@@ -9,6 +9,7 @@
 #include "ImGui/ImGuiOverlays.h"
 #include "Input/InputManager.h"
 #include "Recording/InputRecording.h"
+#include "Rollback/RollbackTest.h"
 #include "SPU2/spu2.h"
 #include "VMManager.h"
 #include "SIO/Memcard/MemoryCardFile.h"
@@ -261,6 +262,11 @@ DEFINE_HOTKEY("InputRecToggleMode", TRANSLATE_NOOP("Hotkeys", "System"),
 	TRANSLATE_NOOP("Hotkeys", "Toggle Input Recording Mode"), [](s32 pressed) {
 		if (!pressed && VMManager::HasValidVM())
 			g_InputRecording.getControls().toggleRecordMode();
+	})
+DEFINE_HOTKEY("RollbackSelfTest", TRANSLATE_NOOP("Hotkeys", "System"),
+	TRANSLATE_NOOP("Hotkeys", "Rollback Self-Test (120 frames)"), [](s32 pressed) {
+		if (!pressed && VMManager::HasValidVM())
+			RollbackTest::Request(120);
 	})
 DEFINE_HOTKEY("PreviousSaveStateSlot", TRANSLATE_NOOP("Hotkeys", "Save States"),
 	TRANSLATE_NOOP("Hotkeys", "Select Previous Save Slot"), [](s32 pressed) {

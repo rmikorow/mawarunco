@@ -42,6 +42,7 @@
 #include "fmt/format.h"
 
 #include <csetjmp>
+#include <span>
 #include <png.h>
 
 using namespace R5900;
@@ -390,6 +391,34 @@ static bool SysState_ComponentFreezeIn(zip_file_t* zf, SysState_Component comp)
 	return true;
 }
 
+// Rollback: same as SysState_ComponentFreezeIn, but reads from an uncompressed in-memory snapshot.
+static bool SysState_ComponentFreezeInMem(std::span<const u8> src, SysState_Component comp)
+{
+	freezeData fP = { 0, nullptr };
+	if (comp.freeze(FreezeAction::Size, &fP) != 0)
+		fP.size = 0;
+
+	if (fP.size > 0)
+	{
+		if (src.size() < static_cast<size_t>(fP.size))
+		{
+			Console.Error(fmt::format("* {}: In-memory state too small ({} < {})", comp.name, src.size(), fP.size));
+			return false;
+		}
+
+		// The Load action only reads from the buffer.
+		fP.data = const_cast<u8*>(src.data());
+	}
+
+	if (comp.freeze(FreezeAction::Load, &fP) != 0)
+	{
+		Console.Error(fmt::format("* {}: Failed to load freeze data", comp.name));
+		return false;
+	}
+
+	return true;
+}
+
 static bool SysState_ComponentFreezeOut(SaveStateBase& writer, SysState_Component comp)
 {
 	freezeData fP = {};
@@ -435,6 +464,13 @@ static bool SysState_ComponentFreezeInNew(zip_file_t* zf, const char* name, bool
 	return do_state_func(sw);
 }
 
+static bool SysState_ComponentFreezeInNewMem(std::span<const u8> src, bool (*do_state_func)(StateWrapper&))
+{
+	StateWrapper::ReadOnlyMemoryStream stream(src.empty() ? nullptr : src.data(), src.size());
+	StateWrapper sw(&stream, StateWrapper::Mode::Read, g_SaveVersion);
+	return do_state_func(sw);
+}
+
 static bool SysState_ComponentFreezeOutNew(SaveStateBase& writer, const char* name, u32 reserve, bool (*do_state_func)(StateWrapper&))
 {
 	StateWrapper::VectorMemoryStream stream(reserve);
@@ -467,6 +503,8 @@ public:
 
 	virtual const char* GetFilename() const = 0;
 	virtual bool FreezeIn(zip_file_t* zf) const = 0;
+	// Rollback: load from an uncompressed in-memory snapshot (SaveState_DownloadState output).
+	virtual bool FreezeInMem(std::span<const u8> src) const = 0;
 	virtual bool FreezeOut(SaveStateBase& writer) const = 0;
 	virtual bool IsRequired() const = 0;
 };
@@ -479,6 +517,7 @@ protected:
 
 public:
 	virtual bool FreezeIn(zip_file_t* zf) const;
+	virtual bool FreezeInMem(std::span<const u8> src) const;
 	virtual bool FreezeOut(SaveStateBase& writer) const;
 	virtual bool IsRequired() const { return true; }
 
@@ -497,6 +536,20 @@ bool MemorySavestateEntry::FreezeIn(zip_file_t* zf) const
 			GetFilename(), expectedSize, static_cast<u32>(bytesRead));
 	}
 
+	return true;
+}
+
+bool MemorySavestateEntry::FreezeInMem(std::span<const u8> src) const
+{
+	const u32 expectedSize = GetDataSize();
+	if (src.size() != expectedSize)
+	{
+		Console.Error("* '%s': in-memory size mismatch (expected 0x%x bytes, got 0x%x bytes)",
+			GetFilename(), expectedSize, static_cast<u32>(src.size()));
+		return false;
+	}
+
+	std::memcpy(GetDataPtr(), src.data(), expectedSize);
 	return true;
 }
 
@@ -617,6 +670,7 @@ public:
 
 	const char* GetFilename() const override { return "SPU2.bin"; }
 	bool FreezeIn(zip_file_t* zf) const override { return SysState_ComponentFreezeIn(zf, SPU2_); }
+	bool FreezeInMem(std::span<const u8> src) const override { return SysState_ComponentFreezeInMem(src, SPU2_); }
 	bool FreezeOut(SaveStateBase& writer) const override { return SysState_ComponentFreezeOut(writer, SPU2_); }
 	bool IsRequired() const override { return true; }
 };
@@ -628,6 +682,7 @@ public:
 
 	const char* GetFilename() const override { return "USB.bin"; }
 	bool FreezeIn(zip_file_t* zf) const override { return SysState_ComponentFreezeInNew(zf, "USB", &USB::DoState); }
+	bool FreezeInMem(std::span<const u8> src) const override { return SysState_ComponentFreezeInNewMem(src, &USB::DoState); }
 	bool FreezeOut(SaveStateBase& writer) const override { return SysState_ComponentFreezeOutNew(writer, "USB", 16 * 1024, &USB::DoState); }
 	bool IsRequired() const override { return false; }
 };
@@ -639,6 +694,7 @@ public:
 
 	const char* GetFilename() const override { return "PAD.bin"; }
 	bool FreezeIn(zip_file_t* zf) const override { return SysState_ComponentFreezeInNew(zf, "PAD", &Pad::Freeze); }
+	bool FreezeInMem(std::span<const u8> src) const override { return SysState_ComponentFreezeInNewMem(src, &Pad::Freeze); }
 	bool FreezeOut(SaveStateBase& writer) const override { return SysState_ComponentFreezeOutNew(writer, "PAD", 16 * 1024, &Pad::Freeze); }
 	bool IsRequired() const override { return true; }
 };
@@ -650,6 +706,7 @@ public:
 
 	const char* GetFilename() const { return "GS.bin"; }
 	bool FreezeIn(zip_file_t* zf) const { return SysState_ComponentFreezeIn(zf, GS); }
+	bool FreezeInMem(std::span<const u8> src) const override { return SysState_ComponentFreezeInMem(src, GS); }
 	bool FreezeOut(SaveStateBase& writer) const { return SysState_ComponentFreezeOut(writer, GS); }
 	bool IsRequired() const { return true; }
 };
@@ -672,6 +729,14 @@ class SaveStateEntry_Achievements final : public BaseSavestateEntry
 			Achievements::LoadState(data.value());
 		else
 			Achievements::LoadState(std::span<const u8>());
+
+		return true;
+	}
+
+	bool FreezeInMem(std::span<const u8> src) const override
+	{
+		if (Achievements::IsActive())
+			Achievements::LoadState(src);
 
 		return true;
 	}
@@ -1226,6 +1291,56 @@ bool SaveState_UnzipFromDisk(const std::string& filename, Error* error)
 		if (!zff || !SavestateEntries[i]->FreezeIn(zff.get()))
 		{
 			Error::SetString(error, fmt::format("Save state corruption in {}.", SavestateEntries[i]->GetFilename()));
+			VMManager::Reset();
+			return false;
+		}
+	}
+
+	PostLoadPrep();
+	return true;
+}
+
+// Rollback: loads a snapshot produced by SaveState_DownloadState without going through a zip file.
+// Mirrors SaveState_UnzipFromDisk. Needs proper testing for states saved with Achievements active.
+bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error)
+{
+	if (list.GetLength() != std::size(SavestateEntries) + 1 ||
+		list[0].GetFilename() != EntryFilename_InternalStructures)
+	{
+		Error::SetString(error, "In-memory state has an unexpected layout.");
+		return false;
+	}
+
+	for (u32 i = 0; i < std::size(SavestateEntries); i++)
+	{
+		if (list[i + 1].GetFilename() != SavestateEntries[i]->GetFilename())
+		{
+			Error::SetString(error, fmt::format("In-memory state entry {} mismatch.", i));
+			return false;
+		}
+	}
+
+	PreLoadPrep();
+
+	// The internal structures start at offset 0 of the buffer (see SaveState_DownloadState).
+	memLoadingState state(list.GetBuffer());
+	if (!state.FreezeBios() || !state.FreezeInternals(error))
+	{
+		if (!error->IsValid())
+			Error::SetString(error, "In-memory state corruption in internal structures.");
+
+		VMManager::Reset();
+		return false;
+	}
+
+	const u8* const base = list.GetBuffer().data();
+	for (u32 i = 0; i < std::size(SavestateEntries); ++i)
+	{
+		const ArchiveEntry& entry = list[i + 1];
+		const std::span<const u8> data(base + entry.GetDataIndex(), entry.GetDataSize());
+		if (!SavestateEntries[i]->FreezeInMem(data))
+		{
+			Error::SetString(error, fmt::format("In-memory state corruption in {}.", SavestateEntries[i]->GetFilename()));
 			VMManager::Reset();
 			return false;
 		}

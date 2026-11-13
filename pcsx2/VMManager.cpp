@@ -31,6 +31,7 @@
 #include "R5900.h"
 #include "Recording/InputRecording.h"
 #include "Recording/InputRecordingControls.h"
+#include "Rollback/RollbackTest.h"
 #include "SIO/Memcard/MemoryCardFile.h"
 #include "SIO/Pad/Pad.h"
 #include "SIO/Sio.h"
@@ -1677,6 +1678,8 @@ void VMManager::Shutdown(bool save_resume_state)
 	if (g_InputRecording.isActive())
 		g_InputRecording.stop();
 
+	RollbackTest::Abort();
+
 	SaveSessionTime(s_disc_serial);
 	s_elf_override = {};
 	ClearELFInfo();
@@ -1808,6 +1811,8 @@ void VMManager::Reset()
 		MTGS::PresentCurrentFrame();
 	}
 
+	RollbackTest::Abort();
+
 	ResetFrameLimiter();
 
 	// If we were paused, state won't be resetting, so don't flip back to running.
@@ -1902,6 +1907,8 @@ bool VMManager::DoLoadState(const char* filename, Error* error)
 	}
 
 	Host::OnSaveStateLoading(filename);
+
+	RollbackTest::Abort();
 
 	if (!SaveState_UnzipFromDisk(filename, error))
 		return false;
@@ -2943,6 +2950,9 @@ void VMManager::Internal::PollInputOnCPUThread()
 		// so we can either read from it, or overwrite it!
 		g_InputRecording.handleControllerDataUpdate();
 	}
+
+	// Rollback self-test: snapshots, restores and input replay happen here, at a fixed point of the vsync.
+	RollbackTest::OnInputPolled();
 }
 
 void VMManager::CheckForCPUConfigChanges(const Pcsx2Config& old_config)
