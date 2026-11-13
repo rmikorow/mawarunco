@@ -63,6 +63,11 @@ u32 GetConsoleSampleRate();
 /// Tells SPU2 to forward audio packets to GSCapture.
 void SetAudioCaptureActive(bool active);
 bool IsAudioCaptureActive();
+
+// Rollback fork: the decoded ADPCM block each voice is currently reading from lives in the PCM
+// cache, which is not part of the savestate. Rollback snapshots save and restore it with these.
+void SaveVoiceBuffers(std::vector<u8>& out);
+void LoadVoiceBuffers(const std::vector<u8>& in);
 } // namespace SPU2
 
 void SPU2write(u32 mem, u16 value);

@@ -6,6 +6,7 @@
 #include "IopMem.h"
 
 #include <cstring>
+#include <vector>
 
 namespace SPU2Savestate
 {
@@ -163,4 +164,61 @@ s32 SPU2Savestate::ThawIt(DataBlock& spud)
 s32 SPU2Savestate::SizeIt()
 {
 	return sizeof(DataBlock);
+}
+
+namespace
+{
+	// One entry per voice: the PCM cache line SBuffer points to (-1 = no block) and its samples.
+	struct VoiceBufferEntry
+	{
+		s32 line;
+		s16 samples[pcm_DecodedSamplesPerBlock];
+	};
+} // namespace
+
+void SPU2::SaveVoiceBuffers(std::vector<u8>& out)
+{
+	out.resize(2 * 24 * sizeof(VoiceBufferEntry));
+	VoiceBufferEntry* entry = reinterpret_cast<VoiceBufferEntry*>(out.data());
+	for (int c = 0; c < 2; c++)
+	{
+		for (int v = 0; v < 24; v++, entry++)
+		{
+			const s16* buf = Cores[c].Voices[v].SBuffer;
+			if (!buf)
+			{
+				entry->line = -1;
+				std::memset(entry->samples, 0, sizeof(entry->samples));
+				continue;
+			}
+
+			const uptr offset = reinterpret_cast<uptr>(buf) - reinterpret_cast<uptr>(&pcm_cache_data[0].Sampledata[0]);
+			entry->line = static_cast<s32>(offset / sizeof(PcmCacheEntry));
+			std::memcpy(entry->samples, buf, sizeof(entry->samples));
+		}
+	}
+}
+
+void SPU2::LoadVoiceBuffers(const std::vector<u8>& in)
+{
+	if (in.size() != 2 * 24 * sizeof(VoiceBufferEntry))
+		return;
+
+	const VoiceBufferEntry* entry = reinterpret_cast<const VoiceBufferEntry*>(in.data());
+	for (int c = 0; c < 2; c++)
+	{
+		for (int v = 0; v < 24; v++, entry++)
+		{
+			V_Voice& vc = Cores[c].Voices[v];
+			if (entry->line < 0 || entry->line >= pcm_BlockCount)
+			{
+				vc.SBuffer = nullptr;
+				continue;
+			}
+
+			s16* buf = pcm_cache_data[entry->line].Sampledata;
+			std::memcpy(buf, entry->samples, sizeof(entry->samples));
+			vc.SBuffer = buf;
+		}
+	}
 }

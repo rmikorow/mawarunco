@@ -14,6 +14,7 @@
 #include "SIO/Pad/PadBase.h"
 #include "SIO/Sio.h"
 #include "SaveState.h"
+#include "SPU2/spu2.h"
 #include "VMManager.h"
 
 #include "common/Console.h"
@@ -47,8 +48,34 @@ namespace RollbackTest
 	static u32 s_frame = 0;
 	static std::unique_ptr<ArchiveEntryList> s_start_state;
 	static std::unique_ptr<ArchiveEntryList> s_end_state;
-	static u32 s_start_frac = 0; // g_eeCycleFrac at S0 (not part of the savestate format)
-	static u32 s_end_frac = 0;
+	// Emulation state that is not part of the savestate format but must be carried by rollback
+	// snapshots (see g_eeCycleFrac and SPU2::SaveVoiceBuffers).
+	struct Extras
+	{
+		u32 ee_cycle_frac = 0;
+		std::vector<u8> spu2_voice_buffers;
+
+		bool operator==(const Extras& o) const
+		{
+			return ee_cycle_frac == o.ee_cycle_frac && spu2_voice_buffers == o.spu2_voice_buffers;
+		}
+	};
+	static Extras s_start_extras;
+	static Extras s_end_extras;
+
+	static Extras CaptureExtras()
+	{
+		Extras e;
+		e.ee_cycle_frac = g_eeCycleFrac;
+		SPU2::SaveVoiceBuffers(e.spu2_voice_buffers);
+		return e;
+	}
+
+	static void RestoreExtras(const Extras& e)
+	{
+		g_eeCycleFrac = e.ee_cycle_frac;
+		SPU2::LoadVoiceBuffers(e.spu2_voice_buffers);
+	}
 	static std::vector<PadData> s_inputs; // (s_num_frames + 1) * NUM_PORTS entries
 
 	static double s_save_ms = 0.0;
@@ -301,7 +328,7 @@ void RollbackTest::OnExecutionExited()
 		if (s_frame == 0)
 		{
 			s_start_state = TakeSnapshot(&s_save_ms);
-			s_start_frac = g_eeCycleFrac;
+			s_start_extras = CaptureExtras();
 			if (!s_start_state)
 			{
 				Host::AddIconOSDMessage(OSD_KEY, ICON_FA_TRIANGLE_EXCLAMATION, "Rollback test: snapshot failed.",
@@ -325,7 +352,7 @@ void RollbackTest::OnExecutionExited()
 					Finish();
 					return;
 				}
-				g_eeCycleFrac = s_start_frac;
+				RestoreExtras(s_start_extras);
 			}
 			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_CIRCLE_DOT,
 				fmt::format("Rollback test: recording {} frames...", s_num_frames), Host::OSD_INFO_DURATION);
@@ -341,7 +368,7 @@ void RollbackTest::OnExecutionExited()
 
 		double end_ms;
 		s_end_state = TakeSnapshot(&end_ms);
-		s_end_frac = g_eeCycleFrac;
+		s_end_extras = CaptureExtras();
 		if (!s_end_state)
 		{
 			Finish();
@@ -358,7 +385,7 @@ void RollbackTest::OnExecutionExited()
 			Finish();
 			return;
 		}
-		g_eeCycleFrac = s_start_frac;
+		RestoreExtras(s_start_extras);
 		s_load_ms = timer.GetTimeMilliseconds();
 		Console.WriteLn(fmt::format("Rollback test: restored S0 in {:.2f} ms, replaying", s_load_ms));
 
@@ -385,9 +412,15 @@ void RollbackTest::OnExecutionExited()
 		Console.WriteLn(fmt::format("Rollback test: {} of {} frames diverged during replay, host input changed the pad after the poll in {} frames",
 			s_trace_mismatches, s_num_frames + 1, s_input_changed_frames));
 		bool same = CompareSnapshots(*s_end_state, *replay_state);
-		if (g_eeCycleFrac != s_end_frac)
+		const Extras replay_extras = CaptureExtras();
+		if (replay_extras.ee_cycle_frac != s_end_extras.ee_cycle_frac)
 		{
-			Console.Error(fmt::format("  g_eeCycleFrac: {} vs {}", s_end_frac, g_eeCycleFrac));
+			Console.Error(fmt::format("  g_eeCycleFrac: {} vs {}", s_end_extras.ee_cycle_frac, replay_extras.ee_cycle_frac));
+			same = false;
+		}
+		if (replay_extras.spu2_voice_buffers != s_end_extras.spu2_voice_buffers)
+		{
+			Console.Error("  SPU2 voice buffers differ");
 			same = false;
 		}
 		const std::string msg = fmt::format("Rollback test{} over {} frames: {} (save {:.1f} ms, load {:.1f} ms)",

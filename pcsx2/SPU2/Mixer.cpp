@@ -103,7 +103,11 @@ static __forceinline void GetNextDataBuffered(V_Core& thiscore, uint voiceidx)
 		PcmCacheEntry& cacheLine = pcm_cache_data[cacheIdx];
 		vc.SBuffer = cacheLine.Sampledata;
 
-		if (cacheLine.Validated && vc.Prev1 == cacheLine.Prev1 && vc.Prev2 == cacheLine.Prev2)
+		// Rollback fork: always decode. Whether a block comes from the cache depends on its history
+		// (partial invalidation on DMA writes, lines shared by voices), and the cache is not part of
+		// the savestate, so cache hits make emulation depend on when the state was loaded.
+		constexpr bool use_pcm_cache = false;
+		if (use_pcm_cache && cacheLine.Validated && vc.Prev1 == cacheLine.Prev1 && vc.Prev2 == cacheLine.Prev2)
 		{
 			// Cached block!  Read from the cache directly.
 			// Make sure to propagate the prev1/prev2 ADPCM:
