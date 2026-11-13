@@ -1095,22 +1095,13 @@ static __fi u32 psxRecClearMem(u32 pc)
 	int blockidx = recBlocks.Index(pc);
 	pxAssert(blockidx != -1);
 
-	// Rollback fork: blocks can overlap now (see psxRecRecompile), so don't stop at the first
-	// preceding block that ends before pc. Blocks never cross a 4K page boundary (except for a
-	// delay slot), so scanning back one page is enough. Every block from the first overlapping one
-	// on is removed below; removing a few extra blocks is harmless. Needs proper testing.
-	const u32 page_floor = ((pc & ~0xfffu) >= 0x1000u) ? ((pc & ~0xfffu) - 0x1000u) : 0u;
-	for (int j = blockidx - 1; j >= 0; j--)
+	while (BASEBLOCKEX* pexblock = recBlocks[blockidx - 1])
 	{
-		BASEBLOCKEX* pexblock = recBlocks[j];
-		if (!pexblock || pexblock->startpc < page_floor)
+		if (pexblock->startpc + pexblock->size * 4 <= lowerextent)
 			break;
 
-		if (pexblock->startpc + pexblock->size * 4 > pc)
-		{
-			lowerextent = std::min(lowerextent, pexblock->startpc);
-			blockidx = j;
-		}
+		lowerextent = std::min(lowerextent, pexblock->startpc);
+		blockidx--;
 	}
 
 	int toRemoveFirst = blockidx;
@@ -1703,12 +1694,10 @@ static void iopRecRecompile(const u32 startpc)
 
 	while (1)
 	{
-		// Rollback fork: upstream ends the block here if the next instruction is already compiled.
-		// That makes block boundaries (and event timing) depend on the compile history, which breaks
-		// determinism after a state restore. Break at 4K page boundaries instead, which only depends
-		// on the code and keeps blocks bounded for psxRecClearMem.
-		if (i != startpc && (i & 0xffc) == 0)
+		BASEBLOCK* pblock = PSX_GETBLOCK(i);
+		if (i != startpc && pblock->GetFnptr() != (uptr)iopJITCompile)
 		{
+			// The next instruction is already compiled, end here and link to it.
 			link_next_block = 1;
 			s_nEndBlock = i;
 			break;

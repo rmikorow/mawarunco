@@ -816,32 +816,49 @@ void recClear(u32 addr, u32 size)
 	if (blockidx == -1)
 		return;
 
-	// Rollback fork: blocks no longer end where another block starts (see recRecompile), so they
-	// can overlap. Remove every block that overlaps [addr, addr + size * 4) individually. A block
-	// never crosses a 4K page boundary (except for a delay slot), so blocks that start more than
-	// one page before addr cannot contain it. Only block starts have entries in the LUT, so each
-	// removed block only needs its own start reset. Needs proper testing with self-modifying code.
-	const u32 page_floor = ((addr & ~0xfffu) >= 0x1000u) ? ((addr & ~0xfffu) - 0x1000u) : 0u;
+	u32 lowerextent = static_cast<u32>(-1), upperextent = 0, ceiling = static_cast<u32>(-1);
 
-	BASEBLOCKEX* pexblock;
-	for (; blockidx >= 0 && (pexblock = recBlocks[blockidx]); blockidx--)
+	BASEBLOCKEX* pexblock = recBlocks[blockidx + 1];
+	if (pexblock)
+		ceiling = pexblock->startpc;
+
+	int toRemoveLast = blockidx;
+
+	while ((pexblock = recBlocks[blockidx]))
 	{
-		const u32 blockstart = pexblock->startpc;
-		const u32 blockend = pexblock->startpc + pexblock->size * 4;
-		if (blockstart < page_floor)
-			break;
-
-		// Blocks starting before addr only overlap if they reach into the range.
-		if (blockend <= addr)
-			continue;
-
+		u32 blockstart = pexblock->startpc;
+		u32 blockend = pexblock->startpc + pexblock->size * 4;
 		BASEBLOCK* pblock = PC_GETBLOCK(blockstart);
-		if (pblock == s_pCurBlock)
-			continue;
 
+		if (pblock == s_pCurBlock)
+		{
+			if (toRemoveLast != blockidx)
+			{
+				recBlocks.Remove((blockidx + 1), toRemoveLast);
+			}
+			toRemoveLast = --blockidx;
+			continue;
+		}
+
+		if (blockend <= addr)
+		{
+			lowerextent = std::max(lowerextent, blockend);
+			break;
+		}
+
+		lowerextent = std::min(lowerextent, blockstart);
+		upperextent = std::max(upperextent, blockend);
 		pblock->SetFnptr((uptr)JITCompile);
-		recBlocks.Remove(blockidx, blockidx);
+
+		blockidx--;
 	}
+
+	if (toRemoveLast != blockidx)
+	{
+		recBlocks.Remove((blockidx + 1), toRemoveLast);
+	}
+
+	upperextent = std::min(upperextent, ceiling);
 
 	for (int i = 0; (pexblock = recBlocks[i]); i++)
 	{
@@ -854,6 +871,9 @@ void recClear(u32 addr, u32 size)
 			pxFail("[EE] Impossible block clearing failure");
 		}
 	}
+
+	if (upperextent > lowerextent)
+		ClearRecLUT(PC_GETBLOCK(lowerextent), upperextent - lowerextent);
 }
 
 
@@ -2329,11 +2349,12 @@ static void recRecompile(const u32 startpc)
 				break;
 			}
 
-			// Rollback fork: upstream also ends the block here if another block already starts at i.
-			// That makes block boundaries, and with them the cycle points where events are tested,
-			// depend on what has been compiled before. After a state restore (fresh caches) the
-			// emulation then diverges. Block boundaries now only depend on the code itself.
-			(void)pblock;
+			if (pblock->GetFnptr() != (uptr)JITCompile)
+			{
+				willbranch3 = 1;
+				s_nEndBlock = i;
+				break;
+			}
 		}
 
 		//HUH ? PSM ? whut ? THIS IS VIRTUAL ACCESS GOD DAMMIT
