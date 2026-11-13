@@ -117,6 +117,10 @@ namespace RollbackTest
 		u64 iop_cycle;
 		u64 ee_hash;
 		u64 iop_hash;
+		// diagnostics only (not compared): cumulative recompiler activity
+		u64 ee_compiled;
+		u64 ee_backpatch;
+		u64 iop_compiled;
 
 		bool operator==(const FrameTrace& o) const
 		{
@@ -199,6 +203,9 @@ RollbackTest::FrameTrace RollbackTest::TakeTrace()
 		psxRegs.cycle,
 		HashMemory(eeMem->Main, Ps2MemSize::ExposedRam),
 		HashMemory(iopMem->Main, Ps2MemSize::ExposedIopRam),
+		g_recStats.ee_compiled,
+		g_recStats.ee_clear_backpatch,
+		g_recStats.iop_compiled,
 	};
 }
 
@@ -207,15 +214,23 @@ void RollbackTest::CheckTrace()
 {
 	const FrameTrace now = TakeTrace();
 	const FrameTrace& rec = s_trace[s_frame];
+	static FrameTrace s_prev_replay = {};
+	const FrameTrace prev_replay = (s_frame == 0) ? now : s_prev_replay;
+	s_prev_replay = now;
 	if (now == rec)
 		return;
 
 	if (s_trace_mismatches++ < 8)
 	{
-		Console.Error(fmt::format("  frame {}: ee_cycle {} vs {} ({:+}), iop_cycle {} vs {} ({:+}), ee_ram {}, iop_ram {}",
+		const FrameTrace& rec_prev = s_trace[s_frame > 0 ? s_frame - 1 : 0];
+		Console.Error(fmt::format("  frame {}: ee_cycle {} vs {} ({:+}), iop_cycle {} vs {} ({:+}), ee_ram {}, iop_ram {} | "
+			"compiled EE {} vs {}, IOP {} vs {}, backpatch {} vs {}",
 			s_frame, rec.ee_cycle, now.ee_cycle, static_cast<s64>(now.ee_cycle - rec.ee_cycle),
 			rec.iop_cycle, now.iop_cycle, static_cast<s64>(now.iop_cycle - rec.iop_cycle),
-			rec.ee_hash == now.ee_hash ? "same" : "DIFF", rec.iop_hash == now.iop_hash ? "same" : "DIFF"));
+			rec.ee_hash == now.ee_hash ? "same" : "DIFF", rec.iop_hash == now.iop_hash ? "same" : "DIFF",
+			rec.ee_compiled - rec_prev.ee_compiled, now.ee_compiled - prev_replay.ee_compiled,
+			rec.iop_compiled - rec_prev.iop_compiled, now.iop_compiled - prev_replay.iop_compiled,
+			rec.ee_backpatch - rec_prev.ee_backpatch, now.ee_backpatch - prev_replay.ee_backpatch));
 	}
 }
 
