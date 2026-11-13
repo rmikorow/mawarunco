@@ -1304,7 +1304,7 @@ bool SaveState_UnzipFromDisk(const std::string& filename, Error* error)
 
 // Rollback: loads a snapshot produced by SaveState_DownloadState without going through a zip file.
 // Mirrors SaveState_UnzipFromDisk. Needs proper testing for states saved with Achievements active.
-bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error, bool clear_cpu_caches)
+bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error, bool clear_cpu_caches, u32 component_mask)
 {
 	if (list.GetLength() != std::size(SavestateEntries) + 1 ||
 		list[0].GetFilename() != EntryFilename_InternalStructures)
@@ -1326,7 +1326,7 @@ bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error, bool c
 
 	// The internal structures start at offset 0 of the buffer (see SaveState_DownloadState).
 	memLoadingState state(list.GetBuffer());
-	if (!state.FreezeBios() || !state.FreezeInternals(error))
+	if ((component_mask & 1u) && (!state.FreezeBios() || !state.FreezeInternals(error)))
 	{
 		if (!error->IsValid())
 			Error::SetString(error, "In-memory state corruption in internal structures.");
@@ -1338,6 +1338,9 @@ bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error, bool c
 	const u8* const base = list.GetBuffer().data();
 	for (u32 i = 0; i < std::size(SavestateEntries); ++i)
 	{
+		if (!(component_mask & (1u << (i + 1))))
+			continue;
+
 		const ArchiveEntry& entry = list[i + 1];
 		const std::span<const u8> data(base + entry.GetDataIndex(), entry.GetDataSize());
 		if (!SavestateEntries[i]->FreezeInMem(data))

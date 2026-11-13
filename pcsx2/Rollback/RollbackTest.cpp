@@ -55,7 +55,31 @@ namespace RollbackTest
 	static u32 s_test_index = 0;
 	static bool s_exit_pending = false;
 	static u32 s_input_changed_frames = 0; // frames where host input changed the pad after the poll
-	static ReloadMode s_reload_mode = ReloadMode::None; // diagnostic, see RollbackTest.h
+	static Variant s_variant = VARIANT_NONE; // diagnostic, see RollbackTest.h
+
+	// Component mask bits for SaveState_LoadFromMemory (SavestateEntries order, bit 0 = internals).
+	static constexpr u32 M_INTERNALS = 1u << 0;
+	static constexpr u32 M_MEMORY = (1u << 1) | (1u << 2) | (1u << 3) | (1u << 4) | (1u << 5) | (1u << 6) | (1u << 7) |
+	                                (1u << 8) | (1u << 9); // EE/IOP RAM, HW regs, scratchpad, VU mem
+	static constexpr u32 M_SPU2 = 1u << 10;
+	static constexpr u32 M_USB = 1u << 11;
+	static constexpr u32 M_PAD = 1u << 12;
+	static constexpr u32 M_GS = 1u << 13;
+	static constexpr u32 M_ALL = 0xFFFFFFFFu;
+
+	static constexpr Variant s_battery_variants[] = {
+		{"full restore (control)", true, true, M_ALL},
+		{"caches + internals", true, true, M_INTERNALS},
+		{"caches + SPU2", true, true, M_SPU2},
+		{"caches + GS", true, true, M_GS},
+		{"caches + PAD/USB", true, true, M_PAD | M_USB},
+		{"caches + memory", true, true, M_MEMORY},
+		{"caches + all but SPU2", true, true, M_ALL & ~M_SPU2},
+		{"all, keep caches", true, false, M_ALL},
+	};
+	static u32 s_battery_next = 0;
+	static u32 s_battery_frames = 0;
+	static bool s_battery_active = false;
 
 	// Per-frame fingerprint, taken right after the input poll. Used to find the first diverging frame.
 	struct FrameTrace
@@ -79,16 +103,6 @@ namespace RollbackTest
 
 	static void Finish();
 
-	static const char* ReloadModeName(ReloadMode mode)
-	{
-		switch (mode)
-		{
-			case ReloadMode::Full: return " [record pass: full restore]";
-			case ReloadMode::CachesOnly: return " [record pass: CPU caches cleared]";
-			case ReloadMode::KeepCaches: return " [record pass: restore without clearing CPU caches]";
-			default: return "";
-		}
-	}
 	static u64 PadSignature();
 	static void ApplyFrameInput(u32 frame);
 	static void DumpEntry(const char* tag, const std::string& name, const u8* data, u32 size);
@@ -96,7 +110,7 @@ namespace RollbackTest
 	static bool CompareSnapshots(const ArchiveEntryList& a, const ArchiveEntryList& b);
 } // namespace RollbackTest
 
-void RollbackTest::Request(u32 frames, ReloadMode reload_mode)
+void RollbackTest::Request(u32 frames, const Variant& variant)
 {
 	if (s_phase != Phase::Idle)
 	{
@@ -106,7 +120,7 @@ void RollbackTest::Request(u32 frames, ReloadMode reload_mode)
 	}
 
 	s_requested_frames = frames;
-	s_reload_mode = reload_mode;
+	s_variant = variant;
 }
 
 void RollbackTest::Abort()
@@ -116,6 +130,8 @@ void RollbackTest::Abort()
 
 	if (s_phase != Phase::Idle)
 		Console.Warning("Rollback test: aborted.");
+
+	s_battery_active = false;
 
 	Finish();
 }
@@ -293,18 +309,14 @@ void RollbackTest::OnExecutionExited()
 
 			Console.WriteLn(fmt::format("Rollback test: recording {} frames (snapshot {:.2f} ms, {} bytes){}",
 				s_num_frames, s_save_ms, s_start_state->GetBuffer().size(),
-				ReloadModeName(s_reload_mode)));
+				s_variant.restore ? fmt::format(" [record pass: {}]", s_variant.name) : std::string()));
 
 			// Diagnostic: make the recording pass go through (part of) the same restore as the replay
 			// pass. If that makes the test pass, restoring has a side effect on emulation.
-			if (s_reload_mode == ReloadMode::CachesOnly)
-			{
-				VMManager::Internal::ClearCPUExecutionCaches();
-			}
-			else if (s_reload_mode == ReloadMode::Full || s_reload_mode == ReloadMode::KeepCaches)
+			if (s_variant.restore)
 			{
 				Error error;
-				if (!SaveState_LoadFromMemory(*s_start_state, &error, s_reload_mode == ReloadMode::Full))
+				if (!SaveState_LoadFromMemory(*s_start_state, &error, s_variant.clear_caches, s_variant.component_mask))
 				{
 					Console.Error(fmt::format("Rollback test: restore failed: {}", error.GetDescription()));
 					Finish();
@@ -368,13 +380,41 @@ void RollbackTest::OnExecutionExited()
 			s_trace_mismatches, s_num_frames + 1, s_input_changed_frames));
 		const bool same = CompareSnapshots(*s_end_state, *replay_state);
 		const std::string msg = fmt::format("Rollback test{} over {} frames: {} (save {:.1f} ms, load {:.1f} ms)",
-			ReloadModeName(s_reload_mode), s_num_frames, same ? "IDENTICAL" : "MISMATCH", s_save_ms, s_load_ms);
+			s_variant.restore ? fmt::format(" [record pass: {}]", s_variant.name) : std::string(), s_num_frames,
+			same ? "IDENTICAL" : "MISMATCH", s_save_ms, s_load_ms);
 		Console.WriteLn(same ? Color_Green : Color_Red, msg);
 		Host::AddIconOSDMessage(OSD_KEY, same ? ICON_FA_CHECK : ICON_FA_TRIANGLE_EXCLAMATION, msg,
 			Host::OSD_ERROR_DURATION);
+		if (s_battery_active)
+			Console.WriteLn(fmt::format("BATTERY RESULT: {:<28} {}", s_variant.name, same ? "IDENTICAL" : "MISMATCH"));
 	}
 
 	Finish();
+
+	if (s_battery_active)
+	{
+		if (s_battery_next < std::size(s_battery_variants))
+		{
+			Request(s_battery_frames, s_battery_variants[s_battery_next++]);
+		}
+		else
+		{
+			s_battery_active = false;
+			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_CHECK, "Rollback test battery finished.", Host::OSD_ERROR_DURATION);
+		}
+	}
+}
+
+void RollbackTest::RequestBattery(u32 frames)
+{
+	if (s_phase != Phase::Idle || s_battery_active)
+		return;
+
+	s_battery_active = true;
+	s_battery_next = 0;
+	s_battery_frames = frames;
+	Console.WriteLn(fmt::format("Rollback test battery: {} variants", std::size(s_battery_variants)));
+	Request(frames, s_battery_variants[s_battery_next++]);
 }
 
 // Writes a differing component to <logs>/rollback/test<N>_<tag>_<name> for offline diffing.

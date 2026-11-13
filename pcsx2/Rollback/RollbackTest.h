@@ -15,17 +15,26 @@
 // CPU thread: input at the input poll point of every vsync, snapshots after the CPU loop exits.
 namespace RollbackTest
 {
-	/// Diagnostic: what the recording pass does right after taking S0.
-	enum class ReloadMode
+	/// Diagnostic: what the recording pass does right after taking S0. The replay pass always does a
+	/// full restore, so a variant that makes the test pass identifies the restore side effect.
+	struct Variant
 	{
-		None,       ///< nothing (the real test)
-		Full,       ///< full restore of S0, like the replay pass
-		CachesOnly, ///< only clear the CPU/recompiler caches
-		KeepCaches, ///< full restore of S0, but keep the CPU/recompiler caches
+		const char* name;
+		bool restore;         ///< restore (parts of) S0
+		bool clear_caches;    ///< clear the CPU/recompiler caches
+		u32 component_mask;   ///< see SaveState_LoadFromMemory
 	};
 
+	/// The real test: the recording pass does nothing.
+	inline constexpr Variant VARIANT_NONE = {"none", false, false, 0};
+	/// Full restore in the recording pass too.
+	inline constexpr Variant VARIANT_FULL = {"full restore", true, true, 0xFFFFFFFFu};
+
 	/// Requests a test over the given number of frames. Starts at the next input poll.
-	void Request(u32 frames, ReloadMode reload_mode = ReloadMode::None);
+	void Request(u32 frames, const Variant& variant = VARIANT_NONE);
+
+	/// Runs a series of diagnostic variants back to back (one test each).
+	void RequestBattery(u32 frames);
 
 	/// Called from VMManager::Internal::PollInputOnCPUThread after the pads have been polled.
 	/// Records or overrides the pad input and requests a CPU loop exit.
