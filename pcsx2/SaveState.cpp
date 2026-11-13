@@ -67,7 +67,7 @@ static void PreLoadPrep(bool clear_cpu_caches = true)
 		VMManager::Internal::ClearCPUExecutionCaches();
 }
 
-static void PostLoadPrep()
+static void PostLoadPrep(bool recompute_vsync_rate = true)
 {
 	resetCache();
 	// Rollback fork: not saved in the state format, see R5900.h.
@@ -86,7 +86,12 @@ static void PostLoadPrep()
 	CBreakPoints::SetSkipFirst(BREAKPOINT_EE, 0);
 	CBreakPoints::SetSkipFirst(BREAKPOINT_IOP, 0);
 
-	UpdateVSyncRate(true);
+	// Rollback fork: the forced recompute resets hsync/vsync deltaCycles to their base values and
+	// moves startCycle, which drops the accumulated hSyncError compensation and shifts the scanline
+	// phase. vSyncInfo is part of the state, so in-memory rollback restores (same session, same
+	// settings) skip it to keep restoring free of side effects.
+	if (recompute_vsync_rate)
+		UpdateVSyncRate(true);
 
 	if (VMManager::Internal::HasBootedELF())
 		R5900SymbolImporter.OnElfLoadedInMemory();
@@ -1353,7 +1358,7 @@ bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error, bool c
 		}
 	}
 
-	PostLoadPrep();
+	PostLoadPrep(false);
 	return true;
 }
 
