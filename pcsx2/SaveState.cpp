@@ -49,7 +49,7 @@ using namespace R5900;
 
 static tlbs s_tlb_backup[std::size(tlb)];
 
-static void PreLoadPrep()
+static void PreLoadPrep(bool clear_cpu_caches = true)
 {
 	// ensure everything is in sync before we start overwriting stuff.
 	if (THREAD_VU1)
@@ -62,7 +62,9 @@ static void PreLoadPrep()
 	// clear protected pages, since we don't want to fault loading EE memory
 	mmap_ResetBlockTracking();
 
-	VMManager::Internal::ClearCPUExecutionCaches();
+	// Rollback diagnostic: can be skipped when restoring the state that is already loaded.
+	if (clear_cpu_caches)
+		VMManager::Internal::ClearCPUExecutionCaches();
 }
 
 static void PostLoadPrep()
@@ -1302,7 +1304,7 @@ bool SaveState_UnzipFromDisk(const std::string& filename, Error* error)
 
 // Rollback: loads a snapshot produced by SaveState_DownloadState without going through a zip file.
 // Mirrors SaveState_UnzipFromDisk. Needs proper testing for states saved with Achievements active.
-bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error)
+bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error, bool clear_cpu_caches)
 {
 	if (list.GetLength() != std::size(SavestateEntries) + 1 ||
 		list[0].GetFilename() != EntryFilename_InternalStructures)
@@ -1320,7 +1322,7 @@ bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error)
 		}
 	}
 
-	PreLoadPrep();
+	PreLoadPrep(clear_cpu_caches);
 
 	// The internal structures start at offset 0 of the buffer (see SaveState_DownloadState).
 	memLoadingState state(list.GetBuffer());

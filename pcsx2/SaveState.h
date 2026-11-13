@@ -60,7 +60,8 @@ extern bool SaveState_ZipToDisk(
 extern bool SaveState_ReadScreenshot(const std::string& filename, u32* out_width, u32* out_height, std::vector<u32>* out_pixels);
 extern bool SaveState_UnzipFromDisk(const std::string& filename, Error* error);
 // Rollback: loads a state produced by SaveState_DownloadState directly from memory.
-extern bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error);
+// clear_cpu_caches = false is only valid when restoring the state that is currently loaded (diagnostics).
+extern bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error, bool clear_cpu_caches = true);
 
 // --------------------------------------------------------------------------------------
 //  SaveStateBase class

@@ -14,6 +14,7 @@
 #include "SIO/Pad/PadBase.h"
 #include "SIO/Sio.h"
 #include "SaveState.h"
+#include "VMManager.h"
 
 #include "common/Console.h"
 #include "common/Error.h"
@@ -54,7 +55,7 @@ namespace RollbackTest
 	static u32 s_test_index = 0;
 	static bool s_exit_pending = false;
 	static u32 s_input_changed_frames = 0; // frames where host input changed the pad after the poll
-	static bool s_reload_start = false; // diagnostic: restore S0 in the recording pass too
+	static ReloadMode s_reload_mode = ReloadMode::None; // diagnostic, see RollbackTest.h
 
 	// Per-frame fingerprint, taken right after the input poll. Used to find the first diverging frame.
 	struct FrameTrace
@@ -77,6 +78,17 @@ namespace RollbackTest
 	static void CheckTrace();
 
 	static void Finish();
+
+	static const char* ReloadModeName(ReloadMode mode)
+	{
+		switch (mode)
+		{
+			case ReloadMode::Full: return " [record pass: full restore]";
+			case ReloadMode::CachesOnly: return " [record pass: CPU caches cleared]";
+			case ReloadMode::KeepCaches: return " [record pass: restore without clearing CPU caches]";
+			default: return "";
+		}
+	}
 	static u64 PadSignature();
 	static void ApplyFrameInput(u32 frame);
 	static void DumpEntry(const char* tag, const std::string& name, const u8* data, u32 size);
@@ -84,7 +96,7 @@ namespace RollbackTest
 	static bool CompareSnapshots(const ArchiveEntryList& a, const ArchiveEntryList& b);
 } // namespace RollbackTest
 
-void RollbackTest::Request(u32 frames, bool reload_start)
+void RollbackTest::Request(u32 frames, ReloadMode reload_mode)
 {
 	if (s_phase != Phase::Idle)
 	{
@@ -94,7 +106,7 @@ void RollbackTest::Request(u32 frames, bool reload_start)
 	}
 
 	s_requested_frames = frames;
-	s_reload_start = reload_start;
+	s_reload_mode = reload_mode;
 }
 
 void RollbackTest::Abort()
@@ -281,14 +293,18 @@ void RollbackTest::OnExecutionExited()
 
 			Console.WriteLn(fmt::format("Rollback test: recording {} frames (snapshot {:.2f} ms, {} bytes){}",
 				s_num_frames, s_save_ms, s_start_state->GetBuffer().size(),
-				s_reload_start ? ", S0 restored in both passes" : ""));
+				ReloadModeName(s_reload_mode)));
 
-			if (s_reload_start)
+			// Diagnostic: make the recording pass go through (part of) the same restore as the replay
+			// pass. If that makes the test pass, restoring has a side effect on emulation.
+			if (s_reload_mode == ReloadMode::CachesOnly)
 			{
-				// Diagnostic: make the recording pass go through the same restore as the replay pass.
-				// If this makes the test pass, restoring a state has a side effect on emulation.
+				VMManager::Internal::ClearCPUExecutionCaches();
+			}
+			else if (s_reload_mode == ReloadMode::Full || s_reload_mode == ReloadMode::KeepCaches)
+			{
 				Error error;
-				if (!SaveState_LoadFromMemory(*s_start_state, &error))
+				if (!SaveState_LoadFromMemory(*s_start_state, &error, s_reload_mode == ReloadMode::Full))
 				{
 					Console.Error(fmt::format("Rollback test: restore failed: {}", error.GetDescription()));
 					Finish();
@@ -352,7 +368,7 @@ void RollbackTest::OnExecutionExited()
 			s_trace_mismatches, s_num_frames + 1, s_input_changed_frames));
 		const bool same = CompareSnapshots(*s_end_state, *replay_state);
 		const std::string msg = fmt::format("Rollback test{} over {} frames: {} (save {:.1f} ms, load {:.1f} ms)",
-			s_reload_start ? " (reload both)" : "", s_num_frames, same ? "IDENTICAL" : "MISMATCH", s_save_ms, s_load_ms);
+			ReloadModeName(s_reload_mode), s_num_frames, same ? "IDENTICAL" : "MISMATCH", s_save_ms, s_load_ms);
 		Console.WriteLn(same ? Color_Green : Color_Red, msg);
 		Host::AddIconOSDMessage(OSD_KEY, same ? ICON_FA_CHECK : ICON_FA_TRIANGLE_EXCLAMATION, msg,
 			Host::OSD_ERROR_DURATION);

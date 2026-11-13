@@ -271,7 +271,17 @@ DEFINE_HOTKEY("RollbackSelfTest", TRANSLATE_NOOP("Hotkeys", "System"),
 DEFINE_HOTKEY("RollbackSelfTestReloadBoth", TRANSLATE_NOOP("Hotkeys", "System"),
 	TRANSLATE_NOOP("Hotkeys", "Rollback Self-Test, restore in both passes (diagnostic)"), [](s32 pressed) {
 		if (!pressed && VMManager::HasValidVM())
-			RollbackTest::Request(120, true);
+			RollbackTest::Request(120, RollbackTest::ReloadMode::Full);
+	})
+DEFINE_HOTKEY("RollbackSelfTestCachesOnly", TRANSLATE_NOOP("Hotkeys", "System"),
+	TRANSLATE_NOOP("Hotkeys", "Rollback Self-Test, clear CPU caches in recording pass (diagnostic)"), [](s32 pressed) {
+		if (!pressed && VMManager::HasValidVM())
+			RollbackTest::Request(120, RollbackTest::ReloadMode::CachesOnly);
+	})
+DEFINE_HOTKEY("RollbackSelfTestKeepCaches", TRANSLATE_NOOP("Hotkeys", "System"),
+	TRANSLATE_NOOP("Hotkeys", "Rollback Self-Test, restore without cache clear in recording pass (diagnostic)"), [](s32 pressed) {
+		if (!pressed && VMManager::HasValidVM())
+			RollbackTest::Request(120, RollbackTest::ReloadMode::KeepCaches);
 	})
 DEFINE_HOTKEY("PreviousSaveStateSlot", TRANSLATE_NOOP("Hotkeys", "Save States"),
 	TRANSLATE_NOOP("Hotkeys", "Select Previous Save Slot"), [](s32 pressed) {
