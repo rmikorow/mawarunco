@@ -94,6 +94,11 @@ u32 s_branchTo;
 static bool s_nBlockFF;
 // Rollback fork: the current block ends because another block already starts there (compile history).
 static bool s_splitAtExistingBlock = false;
+// Rollback fork: [EmuCore/Rollback] DeterministicEEBlocks. When set, blocks do not end where an
+// already compiled block starts, so block boundaries only depend on the code. Code in the middle
+// of a block sees the cycle count of the block start when it touches hardware, so history-dependent
+// boundaries leak into DMA/interrupt timing. Read on every recompiler reset.
+static bool s_deterministicBlocks = true;
 
 // save states for branches
 GPR_reg64 s_saveConstRegs[32];
@@ -644,6 +649,7 @@ alignas(16) static u8 manual_counter[Ps2MemSize::TotalRam >> 12];
 static void recResetRaw()
 {
 	Console.WriteLn(Color_StrongBlack, "EE/iR5900 Recompiler Reset");
+	s_deterministicBlocks = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "DeterministicEEBlocks", true);
 
 	if (CHECK_EXTRAMEM != extraRam)
 	{
@@ -818,49 +824,31 @@ void recClear(u32 addr, u32 size)
 	if (blockidx == -1)
 		return;
 
-	u32 lowerextent = static_cast<u32>(-1), upperextent = 0, ceiling = static_cast<u32>(-1);
+	// Rollback fork: with DeterministicEEBlocks, blocks can overlap, so remove every block that
+	// overlaps [addr, addr + size * 4) individually. Blocks never cross a 4K page boundary (except for
+	// a delay slot), so blocks starting more than one page before addr cannot contain it. Only block
+	// starts have LUT entries, so each removed block only needs its own start reset.
+	// Needs proper testing with self-modifying code.
+	const u32 page_floor = ((addr & ~0xfffu) >= 0x1000u) ? ((addr & ~0xfffu) - 0x1000u) : 0u;
 
-	BASEBLOCKEX* pexblock = recBlocks[blockidx + 1];
-	if (pexblock)
-		ceiling = pexblock->startpc;
-
-	int toRemoveLast = blockidx;
-
-	while ((pexblock = recBlocks[blockidx]))
+	BASEBLOCKEX* pexblock;
+	for (; blockidx >= 0 && (pexblock = recBlocks[blockidx]); blockidx--)
 	{
-		u32 blockstart = pexblock->startpc;
-		u32 blockend = pexblock->startpc + pexblock->size * 4;
-		BASEBLOCK* pblock = PC_GETBLOCK(blockstart);
-
-		if (pblock == s_pCurBlock)
-		{
-			if (toRemoveLast != blockidx)
-			{
-				recBlocks.Remove((blockidx + 1), toRemoveLast);
-			}
-			toRemoveLast = --blockidx;
-			continue;
-		}
+		const u32 blockstart = pexblock->startpc;
+		const u32 blockend = pexblock->startpc + pexblock->size * 4;
+		if (blockstart < page_floor)
+			break;
 
 		if (blockend <= addr)
-		{
-			lowerextent = std::max(lowerextent, blockend);
-			break;
-		}
+			continue;
 
-		lowerextent = std::min(lowerextent, blockstart);
-		upperextent = std::max(upperextent, blockend);
+		BASEBLOCK* pblock = PC_GETBLOCK(blockstart);
+		if (pblock == s_pCurBlock)
+			continue;
+
 		pblock->SetFnptr((uptr)JITCompile);
-
-		blockidx--;
+		recBlocks.Remove(blockidx, blockidx);
 	}
-
-	if (toRemoveLast != blockidx)
-	{
-		recBlocks.Remove((blockidx + 1), toRemoveLast);
-	}
-
-	upperextent = std::min(upperextent, ceiling);
 
 	for (int i = 0; (pexblock = recBlocks[i]); i++)
 	{
@@ -873,9 +861,6 @@ void recClear(u32 addr, u32 size)
 			pxFail("[EE] Impossible block clearing failure");
 		}
 	}
-
-	if (upperextent > lowerextent)
-		ClearRecLUT(PC_GETBLOCK(lowerextent), upperextent - lowerextent);
 }
 
 
@@ -2387,7 +2372,7 @@ static void recRecompile(const u32 startpc)
 				break;
 			}
 
-			if (pblock->GetFnptr() != (uptr)JITCompile)
+			if (!s_deterministicBlocks && pblock->GetFnptr() != (uptr)JITCompile)
 			{
 				willbranch3 = 1;
 				s_nEndBlock = i;

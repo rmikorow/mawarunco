@@ -84,6 +84,9 @@ static bool s_recompilingDelaySlot = false;
 static void iPsxBranchTest(u32 newpc, u32 cpuBranch);
 void psxRecompileNextInstruction(int delayslot);
 
+// Rollback fork: [EmuCore/Rollback] DeterministicIOPBlocks, see the EE recompiler.
+static bool s_deterministicBlocks = true;
+
 extern void (*rpsxBSC[64])();
 void rpsxpropBSC(EEINST* prev, EEINST* pinst);
 
@@ -957,6 +960,7 @@ static void recReserve()
 void recResetIOP()
 {
 	DevCon.WriteLn("iR3000A Recompiler reset.");
+	s_deterministicBlocks = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "DeterministicIOPBlocks", true);
 
 	if (CHECK_EXTRAMEM != extraRam)
 	{
@@ -1095,13 +1099,21 @@ static __fi u32 psxRecClearMem(u32 pc)
 	int blockidx = recBlocks.Index(pc);
 	pxAssert(blockidx != -1);
 
-	while (BASEBLOCKEX* pexblock = recBlocks[blockidx - 1])
+	// Rollback fork: blocks can overlap with DeterministicIOPBlocks, so don't stop at the first
+	// preceding block that ends before pc; scan back a bounded distance and include every block that
+	// still overlaps pc. Removing the blocks in between as well is harmless. Needs proper testing.
+	const u32 scan_floor = (pc >= 0x4000u) ? (pc - 0x4000u) : 0u;
+	for (int j = blockidx - 1; j >= 0; j--)
 	{
-		if (pexblock->startpc + pexblock->size * 4 <= lowerextent)
+		BASEBLOCKEX* pexblock = recBlocks[j];
+		if (!pexblock || pexblock->startpc < scan_floor)
 			break;
 
-		lowerextent = std::min(lowerextent, pexblock->startpc);
-		blockidx--;
+		if (pexblock->startpc + pexblock->size * 4 > pc)
+		{
+			lowerextent = std::min(lowerextent, pexblock->startpc);
+			blockidx = j;
+		}
 	}
 
 	int toRemoveFirst = blockidx;
@@ -1695,7 +1707,7 @@ static void iopRecRecompile(const u32 startpc)
 	while (1)
 	{
 		BASEBLOCK* pblock = PSX_GETBLOCK(i);
-		if (i != startpc && pblock->GetFnptr() != (uptr)iopJITCompile)
+		if (!s_deterministicBlocks && i != startpc && pblock->GetFnptr() != (uptr)iopJITCompile)
 		{
 			// The next instruction is already compiled, end here and link to it.
 			link_next_block = 1;
