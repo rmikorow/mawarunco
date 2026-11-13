@@ -128,6 +128,13 @@ namespace RollbackTest
 		}
 	};
 	static std::vector<FrameTrace> s_trace;
+
+	// Diagnostics: full RAM copies of the first frames of the recording pass, to locate differences.
+	static constexpr u32 RAM_COPY_FRAMES = 3;
+	static std::vector<u8> s_ee_copy[RAM_COPY_FRAMES + 1];
+	static std::vector<u8> s_iop_copy[RAM_COPY_FRAMES + 1];
+	static void CopyRam(u32 frame);
+	static void CompareRam(u32 frame);
 	static u32 s_trace_mismatches = 0;
 
 	static u64 HashMemory(const u8* data, size_t size);
@@ -180,6 +187,50 @@ void RollbackTest::Finish()
 	s_inputs.shrink_to_fit();
 	s_trace.clear();
 	s_trace.shrink_to_fit();
+	for (u32 i = 0; i <= RAM_COPY_FRAMES; i++)
+	{
+		s_ee_copy[i] = {};
+		s_iop_copy[i] = {};
+	}
+}
+
+void RollbackTest::CopyRam(u32 frame)
+{
+	if (frame == 0 || frame > RAM_COPY_FRAMES)
+		return;
+	s_ee_copy[frame].assign(eeMem->Main, eeMem->Main + Ps2MemSize::ExposedRam);
+	s_iop_copy[frame].assign(iopMem->Main, iopMem->Main + Ps2MemSize::ExposedIopRam);
+}
+
+static void LogRamDiff(const char* name, const std::vector<u8>& rec, const u8* now, u32 frame)
+{
+	if (rec.empty())
+		return;
+	u32 shown = 0, total = 0;
+	for (u32 o = 0; o + 4 <= rec.size(); o += 4)
+	{
+		u32 a, b;
+		std::memcpy(&a, &rec[o], 4);
+		std::memcpy(&b, now + o, 4);
+		if (a == b)
+			continue;
+		total++;
+		if (shown < 24)
+		{
+			shown++;
+			Console.Error(fmt::format("    frame {} {} {:08x}: {:08x} vs {:08x}", frame, name, o, a, b));
+		}
+	}
+	if (total)
+		Console.Error(fmt::format("    frame {} {}: {} differing words", frame, name, total));
+}
+
+void RollbackTest::CompareRam(u32 frame)
+{
+	if (frame == 0 || frame > RAM_COPY_FRAMES)
+		return;
+	LogRamDiff("EE", s_ee_copy[frame], eeMem->Main, frame);
+	LogRamDiff("IOP", s_iop_copy[frame], iopMem->Main, frame);
 }
 
 u64 RollbackTest::HashMemory(const u8* data, size_t size)
@@ -219,6 +270,8 @@ void RollbackTest::CheckTrace()
 	s_prev_replay = now;
 	if (now == rec)
 		return;
+
+	CompareRam(s_frame);
 
 	if (s_trace_mismatches++ < 8)
 	{
@@ -374,6 +427,7 @@ void RollbackTest::OnExecutionExited()
 		}
 
 		s_trace.push_back(TakeTrace());
+		CopyRam(s_frame);
 
 		if (s_frame < s_num_frames)
 		{
