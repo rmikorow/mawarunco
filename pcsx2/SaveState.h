@@ -60,9 +60,9 @@ extern bool SaveState_ZipToDisk(
 extern bool SaveState_ReadScreenshot(const std::string& filename, u32* out_width, u32* out_height, std::vector<u32>* out_pixels);
 extern bool SaveState_UnzipFromDisk(const std::string& filename, Error* error);
 // Rollback: loads a state produced by SaveState_DownloadState directly from memory.
-// Diagnostics only (restoring the state that is currently loaded): clear_cpu_caches = false keeps the
-// recompiler caches, component_mask selects the parts to load (bit 0 = internal structures,
-// bit i + 1 = savestate entry i in SavestateEntries order).
+// clear_cpu_caches = false keeps the recompiler caches and restores EE/IOP RAM page by page, dropping
+// only compiled code in pages that changed (rollback). component_mask (diagnostics only) selects the
+// parts to load (bit 0 = internal structures, bit i + 1 = savestate entry i in SavestateEntries order).
 extern bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error, bool clear_cpu_caches = true,
 	u32 component_mask = 0xFFFFFFFFu);
 

@@ -49,6 +49,11 @@ using namespace R5900;
 
 static tlbs s_tlb_backup[std::size(tlb)];
 
+// Rollback fork: set while SaveState_LoadFromMemory restores without clearing the recompiler
+// caches. EE/IOP RAM are then restored page by page, and only code in changed pages is dropped.
+static bool s_incremental_ram_restore = false;
+static constexpr u32 RESTORE_PAGE_SIZE = 0x1000;
+
 static void PreLoadPrep(bool clear_cpu_caches = true)
 {
 	// ensure everything is in sync before we start overwriting stuff.
@@ -59,12 +64,14 @@ static void PreLoadPrep(bool clear_cpu_caches = true)
 	// backup current TLBs, since we're going to overwrite them all
 	std::memcpy(s_tlb_backup, tlb, sizeof(s_tlb_backup));
 
-	// clear protected pages, since we don't want to fault loading EE memory
-	mmap_ResetBlockTracking();
-
-	// Rollback diagnostic: can be skipped when restoring the state that is already loaded.
+	// Rollback fork: an incremental restore keeps the compiled code, so it must also keep the page
+	// protection that detects writes to that code.
 	if (clear_cpu_caches)
+	{
+		// clear protected pages, since we don't want to fault loading EE memory
+		mmap_ResetBlockTracking();
 		VMManager::Internal::ClearCPUExecutionCaches();
+	}
 }
 
 static void PostLoadPrep(bool recompute_vsync_rate = true)
@@ -590,6 +597,24 @@ public:
 	{
 		return MemorySavestateEntry::FreezeIn(zf);
 	}
+
+	bool FreezeInMem(std::span<const u8> src) const override
+	{
+		if (!s_incremental_ram_restore || src.size() != GetDataSize())
+			return MemorySavestateEntry::FreezeInMem(src);
+
+		// Rollback fork: only touch pages that changed and drop the compiled code in them. Writing to
+		// a write-protected code page also faults into the mmap handler, which clears it as well.
+		u8* const dst = GetDataPtr();
+		for (u32 off = 0; off < GetDataSize(); off += RESTORE_PAGE_SIZE)
+		{
+			if (std::memcmp(dst + off, src.data() + off, RESTORE_PAGE_SIZE) == 0)
+				continue;
+			Cpu->Clear(off, RESTORE_PAGE_SIZE / 4);
+			std::memcpy(dst + off, src.data() + off, RESTORE_PAGE_SIZE);
+		}
+		return true;
+	}
 };
 
 class SavestateEntry_IopMemory final : public MemorySavestateEntry
@@ -600,6 +625,23 @@ public:
 	const char* GetFilename() const override { return "iopMemory.bin"; }
 	u8* GetDataPtr() const override { return iopMem->Main; }
 	uint GetDataSize() const override { return Ps2MemSize::ExposedIopRam; }
+
+	bool FreezeInMem(std::span<const u8> src) const override
+	{
+		if (!s_incremental_ram_restore || src.size() != GetDataSize())
+			return MemorySavestateEntry::FreezeInMem(src);
+
+		// Rollback fork: see the EE memory entry. The IOP recompiler has no page protection.
+		u8* const dst = GetDataPtr();
+		for (u32 off = 0; off < GetDataSize(); off += RESTORE_PAGE_SIZE)
+		{
+			if (std::memcmp(dst + off, src.data() + off, RESTORE_PAGE_SIZE) == 0)
+				continue;
+			std::memcpy(dst + off, src.data() + off, RESTORE_PAGE_SIZE);
+			psxCpu->Clear(off, RESTORE_PAGE_SIZE / 4);
+		}
+		return true;
+	}
 };
 
 class SavestateEntry_HwRegs final : public MemorySavestateEntry
@@ -1330,6 +1372,8 @@ bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error, bool c
 	}
 
 	PreLoadPrep(clear_cpu_caches);
+	s_incremental_ram_restore = !clear_cpu_caches;
+	ScopedGuard incremental_guard([]() { s_incremental_ram_restore = false; });
 
 	// The internal structures start at offset 0 of the buffer (see SaveState_DownloadState).
 	memLoadingState state(list.GetBuffer());

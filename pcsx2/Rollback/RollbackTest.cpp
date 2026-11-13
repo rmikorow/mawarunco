@@ -446,7 +446,8 @@ void RollbackTest::OnExecutionExited()
 
 		Common::Timer timer;
 		Error error;
-		if (!SaveState_LoadFromMemory(*s_start_state, &error))
+		// Incremental restore: keep the recompiler caches, as a rollback implementation would.
+		if (!SaveState_LoadFromMemory(*s_start_state, &error, false))
 		{
 			Console.Error(fmt::format("Rollback test: restore failed: {}", error.GetDescription()));
 			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_TRIANGLE_EXCLAMATION,
