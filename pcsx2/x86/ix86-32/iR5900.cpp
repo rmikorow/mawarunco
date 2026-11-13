@@ -92,6 +92,8 @@ static BASEBLOCKEX* s_pCurBlockEx = nullptr;
 u32 s_nEndBlock = 0; // what pc the current block ends
 u32 s_branchTo;
 static bool s_nBlockFF;
+// Rollback fork: the current block ends because another block already starts there (compile history).
+static bool s_splitAtExistingBlock = false;
 
 // save states for branches
 GPR_reg64 s_saveConstRegs[32];
@@ -1381,6 +1383,25 @@ u32 scaleblockcycles_clear()
 //   noDispatch - When set true, then jump to Dispatcher.  Used by the recs
 //   for blocks which perform exception checks without branching (it's enabled by
 //   setting "g_branch = 2";
+// Rollback fork: emits rax = (g_eeCycleFrac + s_nBlockCycles) >> 3 and keeps the remainder in
+// g_eeCycleFrac. With the default cycle rate this replaces the per-block truncation of
+// scaleblockcycles(), so the total cycle count no longer depends on block boundaries.
+// Other cycle rates keep the upstream behavior. Clobbers rax and rcx.
+static bool iUseCarriedCycles()
+{
+	return EmuConfig.Speedhacks.EECycleRate == 0;
+}
+
+static void iLoadCarriedBlockCycles()
+{
+	xMOV(ecx, ptr32[&g_eeCycleFrac]);
+	xADD(ecx, s_nBlockCycles);
+	xMOV(eax, ecx);
+	xSHR(eax, 3);
+	xAND(ecx, 7);
+	xMOV(ptr32[&g_eeCycleFrac], ecx);
+}
+
 static void iBranchTest(u32 newpc)
 {
 	// Check the Event scheduler if our "cycle target" has been reached.
@@ -1390,8 +1411,16 @@ static void iBranchTest(u32 newpc)
 
 	if (EmuConfig.Speedhacks.WaitLoop && s_nBlockFF && newpc == s_branchTo)
 	{
+		if (iUseCarriedCycles())
+		{
+			iLoadCarriedBlockCycles();
+			xADD(ptr64[&cpuRegs.cycle], rax);
+		}
+		else
+		{
+			xADD(ptr64[&cpuRegs.cycle], scaleblockcycles());
+		}
 		xMOV(rax, ptr64[&cpuRegs.nextEventCycle]);
-		xADD(ptr64[&cpuRegs.cycle], scaleblockcycles());
 		xCMP(rax, ptr64[&cpuRegs.cycle]);
 		xCMOVS(rax, ptr64[&cpuRegs.cycle]);
 		xMOV(ptr64[&cpuRegs.cycle], rax);
@@ -1400,8 +1429,16 @@ static void iBranchTest(u32 newpc)
 	}
 	else
 	{
-		xMOV(rax, ptr64[&cpuRegs.cycle]);
-		xADD(rax, scaleblockcycles());
+		if (iUseCarriedCycles())
+		{
+			iLoadCarriedBlockCycles();
+			xADD(rax, ptr64[&cpuRegs.cycle]);
+		}
+		else
+		{
+			xMOV(rax, ptr64[&cpuRegs.cycle]);
+			xADD(rax, scaleblockcycles());
+		}
 		xMOV(ptr64[&cpuRegs.cycle], rax); // update cycles
 		xSUB(rax, ptr64[&cpuRegs.nextEventCycle]);
 
@@ -2264,6 +2301,7 @@ static void recRecompile(const u32 startpc)
 
 	// reset recomp state variables
 	s_nBlockCycles = 0;
+	s_splitAtExistingBlock = false;
 	s_nBlockInterlocked = false;
 	pc = startpc;
 	g_cpuHasConstReg = g_cpuFlushedConstReg = 1;
@@ -2353,6 +2391,7 @@ static void recRecompile(const u32 startpc)
 			{
 				willbranch3 = 1;
 				s_nEndBlock = i;
+				s_splitAtExistingBlock = true;
 				break;
 			}
 		}
@@ -2733,13 +2772,23 @@ StartRecomp:
 			// case can result in very short blocks which should not issue branch tests for
 			// performance reasons.
 
+			// Rollback fork: a split at an existing block depends on compile history, so it must not
+			// add an event test (that would move event timing). Page splits keep the upstream behavior.
 			const int numinsts = (pc - startpc) / 4;
-			if (numinsts > 6)
+			if (numinsts > 6 && !s_splitAtExistingBlock)
 				SetBranchImm(pc);
 			else
 			{
 				xMOV(ptr32[&cpuRegs.pc], pc);
-				xADD(ptr64[&cpuRegs.cycle], scaleblockcycles());
+				if (iUseCarriedCycles())
+				{
+					iLoadCarriedBlockCycles();
+					xADD(ptr64[&cpuRegs.cycle], rax);
+				}
+				else
+				{
+					xADD(ptr64[&cpuRegs.cycle], scaleblockcycles());
+				}
 				recBlocks.Link(HWADDR(pc), xJcc32());
 			}
 		}

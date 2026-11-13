@@ -353,6 +353,11 @@ struct R5900cpu
 };
 
 extern R5900cpu *Cpu;
+
+// Rollback fork: fraction of an EE cycle (in 1/8 units) carried between recompiled blocks, so the
+// cycle count does not depend on where blocks are split (which depends on compile history).
+// Not part of the savestate format: reset to 0 on state load, rollback snapshots carry it.
+extern u32 g_eeCycleFrac;
 extern R5900cpu intCpu;
 extern R5900cpu recCpu;
 

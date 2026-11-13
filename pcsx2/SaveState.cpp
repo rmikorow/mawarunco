@@ -70,6 +70,8 @@ static void PreLoadPrep(bool clear_cpu_caches = true)
 static void PostLoadPrep()
 {
 	resetCache();
+	// Rollback fork: not saved in the state format, see R5900.h.
+	g_eeCycleFrac = 0;
 //	WriteCP0Status(cpuRegs.CP0.n.Status.val);
 	for (int i = 0; i < 48; i++)
 	{

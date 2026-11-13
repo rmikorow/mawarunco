@@ -47,6 +47,8 @@ namespace RollbackTest
 	static u32 s_frame = 0;
 	static std::unique_ptr<ArchiveEntryList> s_start_state;
 	static std::unique_ptr<ArchiveEntryList> s_end_state;
+	static u32 s_start_frac = 0; // g_eeCycleFrac at S0 (not part of the savestate format)
+	static u32 s_end_frac = 0;
 	static std::vector<PadData> s_inputs; // (s_num_frames + 1) * NUM_PORTS entries
 
 	static double s_save_ms = 0.0;
@@ -166,7 +168,7 @@ u64 RollbackTest::HashMemory(const u8* data, size_t size)
 RollbackTest::FrameTrace RollbackTest::TakeTrace()
 {
 	return FrameTrace{
-		cpuRegs.cycle,
+		cpuRegs.cycle * 8 + g_eeCycleFrac,
 		psxRegs.cycle,
 		HashMemory(eeMem->Main, Ps2MemSize::ExposedRam),
 		HashMemory(iopMem->Main, Ps2MemSize::ExposedIopRam),
@@ -299,6 +301,7 @@ void RollbackTest::OnExecutionExited()
 		if (s_frame == 0)
 		{
 			s_start_state = TakeSnapshot(&s_save_ms);
+			s_start_frac = g_eeCycleFrac;
 			if (!s_start_state)
 			{
 				Host::AddIconOSDMessage(OSD_KEY, ICON_FA_TRIANGLE_EXCLAMATION, "Rollback test: snapshot failed.",
@@ -322,6 +325,7 @@ void RollbackTest::OnExecutionExited()
 					Finish();
 					return;
 				}
+				g_eeCycleFrac = s_start_frac;
 			}
 			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_CIRCLE_DOT,
 				fmt::format("Rollback test: recording {} frames...", s_num_frames), Host::OSD_INFO_DURATION);
@@ -337,6 +341,7 @@ void RollbackTest::OnExecutionExited()
 
 		double end_ms;
 		s_end_state = TakeSnapshot(&end_ms);
+		s_end_frac = g_eeCycleFrac;
 		if (!s_end_state)
 		{
 			Finish();
@@ -353,6 +358,7 @@ void RollbackTest::OnExecutionExited()
 			Finish();
 			return;
 		}
+		g_eeCycleFrac = s_start_frac;
 		s_load_ms = timer.GetTimeMilliseconds();
 		Console.WriteLn(fmt::format("Rollback test: restored S0 in {:.2f} ms, replaying", s_load_ms));
 
@@ -378,7 +384,12 @@ void RollbackTest::OnExecutionExited()
 	{
 		Console.WriteLn(fmt::format("Rollback test: {} of {} frames diverged during replay, host input changed the pad after the poll in {} frames",
 			s_trace_mismatches, s_num_frames + 1, s_input_changed_frames));
-		const bool same = CompareSnapshots(*s_end_state, *replay_state);
+		bool same = CompareSnapshots(*s_end_state, *replay_state);
+		if (g_eeCycleFrac != s_end_frac)
+		{
+			Console.Error(fmt::format("  g_eeCycleFrac: {} vs {}", s_end_frac, g_eeCycleFrac));
+			same = false;
+		}
 		const std::string msg = fmt::format("Rollback test{} over {} frames: {} (save {:.1f} ms, load {:.1f} ms)",
 			s_variant.restore ? fmt::format(" [record pass: {}]", s_variant.name) : std::string(), s_num_frames,
 			same ? "IDENTICAL" : "MISMATCH", s_save_ms, s_load_ms);
