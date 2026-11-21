@@ -145,6 +145,20 @@ namespace RollbackTest
 
 	// Diagnostics: full RAM copies of the first frames of the recording pass, to locate differences.
 	static constexpr u32 RAM_COPY_FRAMES = 3;
+
+	// Diagnostics: timer reads during frames 1..TIMER_TRACE_FRAMES of both passes.
+	static constexpr u32 TIMER_TRACE_FRAMES = 2;
+	struct TimerRead
+	{
+		u32 frame, unit, index, pc;
+		u64 cycle;
+		u32 value;
+	};
+	static std::vector<TimerRead> s_timer_rec;
+	static std::vector<TimerRead> s_timer_replay;
+	static bool s_timer_compared = false;
+	static void UpdateTimerTrace();
+	static void CompareTimerTraces();
 	static std::vector<u8> s_ee_copy[RAM_COPY_FRAMES + 1];
 	static std::vector<u8> s_iop_copy[RAM_COPY_FRAMES + 1];
 	static void CopyRam(u32 frame);
@@ -163,6 +177,57 @@ namespace RollbackTest
 	static std::unique_ptr<ArchiveEntryList> TakeSnapshot(double* ms);
 	static bool CompareSnapshots(const ArchiveEntryList& a, const ArchiveEntryList& b);
 } // namespace RollbackTest
+
+bool RollbackTest::g_trace_timers = false;
+
+void RollbackTest::TraceTimerRead(u32 unit, u32 index, u32 pc, u64 cycle, u32 value)
+{
+	std::vector<TimerRead>& v = (s_phase == Phase::Recording) ? s_timer_rec : s_timer_replay;
+	if (v.size() < 4096)
+		v.push_back(TimerRead{s_frame, unit, index, pc, cycle, value});
+}
+
+// Tracing covers the emulated segments 0..TIMER_TRACE_FRAMES-1 after S0 (segment k runs from the exit
+// after input poll k to the exit after poll k + 1). In both passes s_frame has already been advanced when
+// the CPU resumes, so the segment about to run is s_frame - 1.
+void RollbackTest::UpdateTimerTrace()
+{
+	const bool active = (s_phase != Phase::Idle) && s_frame >= 1;
+	const u32 segment = active ? s_frame - 1 : 0;
+	g_trace_timers = active && segment < TIMER_TRACE_FRAMES;
+	if (s_phase == Phase::Replaying && active && segment >= TIMER_TRACE_FRAMES && !s_timer_compared)
+		CompareTimerTraces();
+}
+
+void RollbackTest::CompareTimerTraces()
+{
+	s_timer_compared = true;
+	const size_t n = std::min(s_timer_rec.size(), s_timer_replay.size());
+	size_t first = n;
+	for (size_t i = 0; i < n; i++)
+	{
+		const TimerRead& a = s_timer_rec[i];
+		const TimerRead& b = s_timer_replay[i];
+		if (a.unit != b.unit || a.index != b.index || a.pc != b.pc || a.cycle != b.cycle || a.value != b.value)
+		{
+			first = i;
+			break;
+		}
+	}
+	if (first == n && s_timer_rec.size() == s_timer_replay.size())
+		return;
+
+	Console.Error(fmt::format("  TIMER TRACE: {} vs {} reads, first difference at #{}", s_timer_rec.size(), s_timer_replay.size(), first));
+	const size_t from = first > 3 ? first - 3 : 0;
+	for (size_t i = from; i < std::min(n, first + 6); i++)
+	{
+		const TimerRead& a = s_timer_rec[i];
+		const TimerRead& b = s_timer_replay[i];
+		Console.Error(fmt::format("    #{} {} T{} | rec f{} pc {:08x} cyc {} val {:04x} | rep f{} pc {:08x} cyc {} val {:04x}{}",
+			i, a.unit ? "IOP" : "EE", a.index, a.frame, a.pc, a.cycle, a.value, b.frame, b.pc, b.cycle, b.value,
+			(a.pc != b.pc || a.cycle != b.cycle || a.value != b.value) ? "  <==" : ""));
+	}
+}
 
 void RollbackTest::Request(u32 frames, const Variant& variant)
 {
@@ -195,6 +260,7 @@ void RollbackTest::Finish()
 	s_phase = Phase::Idle;
 	s_requested_frames = 0;
 	s_exit_pending = false;
+	g_trace_timers = false;
 	s_start_state.reset();
 	s_end_state.reset();
 	s_inputs.clear();
@@ -381,6 +447,9 @@ void RollbackTest::OnInputPolled()
 		s_trace.reserve(s_num_frames + 1);
 		s_trace_mismatches = 0;
 		s_input_changed_frames = 0;
+		s_timer_rec.clear();
+		s_timer_replay.clear();
+		s_timer_compared = false;
 		s_phase = Phase::Recording;
 	}
 
@@ -434,6 +503,8 @@ void RollbackTest::ApplyFrameInput(u32 frame)
 
 void RollbackTest::OnBeforeExecute()
 {
+	UpdateTimerTrace();
+
 	// OnExecutionExited() has already advanced s_frame, so the frame being emulated is s_frame - 1.
 	if (s_phase == Phase::Idle || s_frame == 0 || s_inputs.size() < s_frame * NUM_PORTS)
 		return;

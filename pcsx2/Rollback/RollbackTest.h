@@ -50,4 +50,9 @@ namespace RollbackTest
 
 	/// Cancels a running test (state load, reset, shutdown).
 	void Abort();
+
+	/// Diagnostics: timer reads are traced while this is set (first frames of both passes).
+	extern bool g_trace_timers;
+	/// unit 0 = EE, 1 = IOP. pc is the last written PC (usually the block start in the recompilers).
+	void TraceTimerRead(u32 unit, u32 index, u32 pc, u64 cycle, u32 value);
 } // namespace RollbackTest

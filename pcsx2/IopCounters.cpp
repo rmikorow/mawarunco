@@ -8,6 +8,7 @@
 #include "IopCounters.h"
 #include "R3000A.h"
 #include "Common.h"
+#include "Rollback/RollbackTest.h"
 #include "SPU2/spu2.h"
 #include "DEV9/DEV9.h"
 #include "USB/USB.h"
@@ -757,6 +758,9 @@ u16 psxRcntRcount16(int index)
 	psxRcntSync(index);
 	const u32 retval = (u32)psxCounters[index].count;
 
+	if (RollbackTest::g_trace_timers) [[unlikely]]
+		RollbackTest::TraceTimerRead(1, index, psxRegs.pc, psxRegs.cycle, retval);
+
 	pxAssert(index < 3);
 
 	PSXCNT_LOG("IOP Counter[%d] readCount16 = %lx", index, (u16)retval);
@@ -769,6 +773,9 @@ u32 psxRcntRcount32(int index)
 	psxRcntSync(index);
 	
 	const u32 retval = (u32)psxCounters[index].count;
+
+	if (RollbackTest::g_trace_timers) [[unlikely]]
+		RollbackTest::TraceTimerRead(1, index, psxRegs.pc, psxRegs.cycle, retval);
 
 	pxAssert(index >= 3 && index < 6);
 

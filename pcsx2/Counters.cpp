@@ -18,6 +18,7 @@
 #include "SIO/Sio.h"
 #include "SPU2/spu2.h"
 #include "Recording/InputRecording.h"
+#include "Rollback/RollbackTest.h"
 #include "VMManager.h"
 #include "VUmicro.h"
 
@@ -957,6 +958,9 @@ __fi u32 rcntRcount(int index)
 	rcntSyncCounter(index);
 
 	ret = counters[index].count;
+
+	if (RollbackTest::g_trace_timers) [[unlikely]]
+		RollbackTest::TraceTimerRead(0, index, cpuRegs.pc, cpuRegs.cycle, ret);
 
 	// Spams the Console.
 	EECNT_LOG("EE Counter[%d] readCount32 = %x", index, ret);
