@@ -649,21 +649,36 @@ Rollback::PadInput Netplay::LocalInput(u32 port)
 	if (!s_options.test_input)
 		return Rollback::CaptureLocalInput(port);
 
-	// Testing: a new random combination of d-pad and face buttons every 6 to 21 frames, so that the
-	// remote side mispredicts and rolls back. Start and Select are never pressed (they pause the game).
+	// Testing. Button bits (active low): 4 triangle, 5 circle, 6 cross, 7 square, 8 select, 11 start,
+	// 12-15 d-pad.
+	static constexpr u16 CIRCLE = 1u << 5;
+	static constexpr u16 RANDOM_MASK = 0xf0b0u; // d-pad, triangle, circle, square (no cross = "back")
+
+	Rollback::PadInput input;
+
+	// First 10 seconds: tap circle (5 frames pressed, 25 released) to confirm the preselected characters
+	// on the character select screen.
+	const int frame = ggrs_current_frame(s_session);
+	if (frame < 600)
+	{
+		input.buttons = ((frame % 30) < 5) ? static_cast<u16>(~CIRCLE) : 0xffff;
+		return input;
+	}
+
+	// Then a new random combination of d-pad and face buttons every 6 to 21 frames, so that the remote
+	// side mispredicts and rolls back. Start and Select are never pressed (they pause the game).
 	static u32 s_hold = 0;
 	static u16 s_buttons = 0xffff;
 	static u32 s_rng = 0x9e3779b9u ^ (s_options.local_player * 0x85ebca6bu) ^ s_options.local_port;
 	if (s_hold == 0)
 	{
 		s_rng = s_rng * 1664525u + 1013904223u;
-		const u16 pressed = static_cast<u16>((s_rng >> 8) & 0xf0f0u); // bits 4-7 face, 12-15 d-pad
+		const u16 pressed = static_cast<u16>((s_rng >> 8) & RANDOM_MASK);
 		s_buttons = static_cast<u16>(~pressed);
 		s_hold = 6 + ((s_rng >> 24) & 15);
 	}
 	s_hold--;
 
-	Rollback::PadInput input;
 	input.buttons = s_buttons;
 	return input;
 }
