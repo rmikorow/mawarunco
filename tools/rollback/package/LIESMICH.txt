@@ -1,0 +1,81 @@
+Fate/unlimited codes - Online mit Rollback (Testversion)
+=======================================================
+
+Das ist ein angepasster PCSX2 (PS2-Emulator) mit Rollback-Netcode fuer
+Fate/unlimited codes (PS2, SLPM-55108). Zwei Spieler verbinden sich direkt
+ueber die IP-Adresse. Einer ist Host (Spieler 1), der andere verbindet sich
+(Spieler 2).
+
+
+1. Einmalig einrichten
+----------------------
+
+a) BIOS: Die BIOS-Datei aus deiner eigenen PS2 (4 MB, meist .bin) in den
+   Ordner "bios" kopieren.
+
+b) Spiel: Dein ISO von Fate/unlimited codes (SLPM-55108, von deiner eigenen
+   Disc) in den Ordner "game" kopieren. Der Dateiname ist egal.
+
+c) Controller: Ein Xbox-/XInput-Controller wird normalerweise automatisch
+   erkannt. Falls die Tasten nicht reagieren: "Einstellungen.bat" starten,
+   dort unter Einstellungen > Controller nur den Controller-Port 1 belegen.
+   Sonst bitte nichts an den Einstellungen aendern, beide Spieler muessen
+   exakt dieselben benutzen.
+
+d) Nur der HOST: Im Router eine Portfreigabe einrichten:
+   UDP-Port 7000 an die lokale IP-Adresse des eigenen PCs.
+   Der andere Spieler (Join) braucht keine Portfreigabe.
+
+Beim ersten Start fragt die Windows-Firewall nach, ob PCSX2 ins Netzwerk
+darf: bitte "Zulassen" waehlen (private und oeffentliche Netzwerke).
+
+Hinweis: Windows SmartScreen kann beim ersten Start warnen, weil die Dateien
+nicht signiert sind ("Weitere Informationen" > "Trotzdem ausfuehren").
+
+
+2. Spielen
+----------
+
+Host (Spieler 1):
+    "Host.bat" starten. Dem anderen Spieler die eigene oeffentliche
+    IP-Adresse sagen (z. B. auf wieistmeineip.de nachsehen).
+
+Join (Spieler 2):
+    "Join.bat" starten und die IP-Adresse des Hosts eingeben.
+
+Beide Spiele starten an derselben Stelle (Startdatei "start.p2s") und warten,
+bis die Verbindung steht. Oben im Bild erscheint dann "Netplay: connected".
+Jeder spielt mit seinem Controller an Port 1, das Spiel ordnet ihn
+automatisch dem richtigen Spieler zu.
+
+Beenden: einfach das Spielfenster schliessen.
+
+
+3. Gut zu wissen
+----------------
+
+- Die Startskripte pruefen, ob dein ISO und dein BIOS zu denen des
+  Organisators passen. Ein abweichendes ISO funktioniert nicht. Ein anderes
+  BIOS kann funktionieren, kann aber zu Desyncs fuehren.
+- Memory Cards sind waehrend des Online-Spiels abgeschaltet. Das ist Absicht.
+- Erscheint oben "desync detected", laufen die beiden Spiele auseinander.
+  Bitte dann Bescheid geben.
+- Eingabeverzoegerung (Delay) und Rollback-Tiefe stehen oben in netplay.ps1
+  (Delay 1, Rollback 2). Bitte nur in Absprache aendern.
+
+
+4. Nach dem Test
+----------------
+
+Bitte die Datei "logs\emulog.txt" an den Organisator schicken. Sie enthaelt
+Verbindungs- und Desync-Informationen (keine persoenlichen Daten ausser
+Dateinamen).
+
+
+Lizenz und Quellcode
+--------------------
+
+PCSX2 steht unter der GNU GPL Version 3 (siehe docs\GPL.html). Dieses Paket
+basiert auf PCSX2 v2.8.2 (https://github.com/PCSX2/pcsx2, Tag v2.8.2). Alle
+Aenderungen liegen als Patch im Ordner "source". GGRS (Rollback-Bibliothek)
+steht unter MIT/Apache-2.0 (docs\ggrs).
