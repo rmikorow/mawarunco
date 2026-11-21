@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rollback fork: builds the GGRS C wrapper with cargo before the project and links it.
+     The Rust toolchain location can be overridden with the RollbackRustDir property or environment variable. -->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <RollbackRustDir Condition="'$(RollbackRustDir)' == ''"><Rust toolchain folder></RollbackRustDir>
+    <GgrsCapiDir>$(MSBuildThisFileDirectory)</GgrsCapiDir>
+    <GgrsCapiLib>$(GgrsCapiDir)target\release\ggrs_capi.lib</GgrsCapiLib>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(GgrsCapiDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <!-- System libraries required by the Rust standard library (cargo rustc -print native-static-libs). -->
+      <AdditionalDependencies>$(GgrsCapiLib);bcrypt.lib;advapi32.lib;ntdll.lib;userenv.lib;ws2_32.lib;dbghelp.lib;synchronization.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <Target Name="BuildGgrsCapi" BeforeTargets="ClCompile">
+    <Exec Command="set &quot;RUSTUP_HOME=$(RollbackRustDir)\rustup&quot; &amp;&amp; set &quot;CARGO_HOME=$(RollbackRustDir)\cargo&quot; &amp;&amp; &quot;$(RollbackRustDir)\cargo\bin\cargo.exe&quot; build --release --quiet --manifest-path &quot;$(GgrsCapiDir)Cargo.toml&quot;" />
+  </Target>
+</Project>

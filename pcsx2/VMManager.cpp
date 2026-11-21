@@ -32,6 +32,7 @@
 #include "Recording/InputRecording.h"
 #include "Recording/InputRecordingControls.h"
 #include "Rollback/Rollback.h"
+#include "Rollback/Netplay.h"
 #include "Rollback/RollbackTest.h"
 #include "SIO/Memcard/MemoryCardFile.h"
 #include "SIO/Pad/Pad.h"
@@ -1680,6 +1681,7 @@ void VMManager::Shutdown(bool save_resume_state)
 		g_InputRecording.stop();
 
 	RollbackTest::Abort();
+	Netplay::Stop();
 
 	SaveSessionTime(s_disc_serial);
 	s_elf_override = {};
@@ -1813,6 +1815,7 @@ void VMManager::Reset()
 	}
 
 	RollbackTest::Abort();
+	Netplay::Stop();
 
 	ResetFrameLimiter();
 
@@ -1910,6 +1913,7 @@ bool VMManager::DoLoadState(const char* filename, Error* error)
 	Host::OnSaveStateLoading(filename);
 
 	RollbackTest::Abort();
+	Netplay::Stop();
 
 	if (!SaveState_UnzipFromDisk(filename, error))
 		return false;
@@ -2765,13 +2769,18 @@ void VMManager::Execute()
 		vtlb_ResetFastmem();
 	}
 
-	// Rollback self-test: keep the pad state of the current frame, host events may have changed it.
+	// Rollback netplay: the CPU must not run while the session waits for the remote peer.
+	if (!Netplay::BeforeExecute())
+		return;
+
+	// Rollback self-test diagnostics (timer trace).
 	RollbackTest::OnBeforeExecute();
 
 	// Execute until we're asked to stop.
 	Cpu->Execute();
 
-	// Rollback self-test: snapshots and restores happen here, outside of the CPU loop.
+	// Rollback netplay and self-test: snapshots and restores happen here, outside of the CPU loop.
+	Netplay::OnExecutionExited();
 	RollbackTest::OnExecutionExited();
 }
 
@@ -2997,7 +3006,11 @@ void VMManager::Internal::PollInputOnCPUThread()
 	}
 
 	// Rollback self-test: snapshots, restores and input replay happen here, at a fixed point of the vsync.
-	RollbackTest::OnInputPolled();
+	// Rollback: netplay owns the frame boundary while active, the self-test only runs without it.
+	if (Netplay::IsActive())
+		Netplay::OnInputPolled();
+	else
+		RollbackTest::OnInputPolled();
 }
 
 void VMManager::CheckForCPUConfigChanges(const Pcsx2Config& old_config)

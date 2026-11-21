@@ -32,6 +32,7 @@
 #include "pcsx2/MTGS.h"
 #include "pcsx2/PerformanceMetrics.h"
 #include "pcsx2/SPU2/spu2.h"
+#include "pcsx2/Rollback/Netplay.h"
 #include "pcsx2/VMManager.h"
 
 #include "common/Assertions.h"
@@ -2144,6 +2145,7 @@ void QtHost::PrintCommandLineHelp(const std::string_view progname)
 	std::fprintf(stderr, "  -slowboot: Force slow boot for provided filename.\n");
 	std::fprintf(stderr, "  -state <index>: Loads specified save state by index.\n");
 	std::fprintf(stderr, "  -statefile <filename>: Loads state from the specified filename.\n");
+	std::fprintf(stderr, "  -netplay <spec>: Rollback netplay, e.g. \"port=7000,remote=127.0.0.1:7001,player=0,delay=1,rollback=2\" or \"synctest,distance=2\".\n");
 	std::fprintf(stderr, "  -fullscreen: Enters fullscreen mode immediately after starting.\n");
 	std::fprintf(stderr, "  -nofullscreen: Prevents fullscreen mode from triggering if enabled.\n");
 	std::fprintf(stderr, "  -bigpicture: Forces PCSX2 to use the Big Picture mode (useful for controller-only and couch play).\n");
@@ -2237,6 +2239,17 @@ bool QtHost::ParseCommandLineOptions(const QStringList& args, std::shared_ptr<VM
 			else if (CHECK_ARG_PARAM(QStringLiteral("-statefile")))
 			{
 				AutoBoot(autoboot)->save_state = (++it)->toStdString();
+				continue;
+			}
+			else if (CHECK_ARG_PARAM(QStringLiteral("-netplay")))
+			{
+				// Rollback fork: start a netplay session (or sync test) once the VM runs.
+				Error error;
+				if (!Netplay::SetLaunchOptions((++it)->toStdString(), &error))
+				{
+					std::fprintf(stderr, "%s\n", error.GetDescription().c_str());
+					return false;
+				}
 				continue;
 			}
 			else if (CHECK_ARG_PARAM(QStringLiteral("-elf")))

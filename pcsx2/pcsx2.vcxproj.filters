@@ -1130,6 +1130,9 @@
     <ClCompile Include="Recording\InputRecordingFile.cpp">
       <Filter>Tools\Input Recording</Filter>
     </ClCompile>
+    <ClCompile Include="Rollback\Netplay.cpp">
+      <Filter>Tools\Input Recording</Filter>
+    </ClCompile>
     <ClCompile Include="Rollback\Rollback.cpp">
       <Filter>Tools\Input Recording</Filter>
     </ClCompile>
@@ -2086,6 +2089,9 @@
       <Filter>Tools\Input Recording</Filter>
     </ClInclude>
     <ClInclude Include="Recording\InputRecordingFile.h">
+      <Filter>Tools\Input Recording</Filter>
+    </ClInclude>
+    <ClInclude Include="Rollback\Netplay.h">
       <Filter>Tools\Input Recording</Filter>
     </ClInclude>
     <ClInclude Include="Rollback\Rollback.h">

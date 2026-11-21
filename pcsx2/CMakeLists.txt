@@ -960,6 +960,7 @@ set(pcsx2RecordingSources
 	${rec_src}/InputRecordingControls.cpp
 	${rec_src}/InputRecordingFile.cpp
 	${rec_src}/PadData.cpp
+	Rollback/Netplay.cpp
 	Rollback/Rollback.cpp
 	Rollback/RollbackTest.cpp
 	${rec_src}/Utilities/InputRecordingLogger.cpp
@@ -971,6 +972,7 @@ set(pcsx2RecordingHeaders
 	${rec_src}/InputRecordingControls.h
 	${rec_src}/InputRecordingFile.h
 	${rec_src}/PadData.h
+	Rollback/Netplay.h
 	Rollback/Rollback.h
 	Rollback/RollbackTest.h
 	${rec_src}/Utilities/InputRecordingLogger.h

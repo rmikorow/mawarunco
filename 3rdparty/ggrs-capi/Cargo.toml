@@ -1,0 +1,21 @@
+[package]
+name = "ggrs-capi"
+version = "0.1.0"
+edition = "2024"
+description = "Minimal C API over GGRS for the PCSX2 rollback fork"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+ggrs = "0.13.0"
+serde = { version = "1", features = ["derive"] }
+
+# A panic must never unwind into C++.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

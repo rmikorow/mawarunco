@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "Rollback/Netplay.h"
 #include "SIO/Memcard/MemoryCardFile.h"
 
 #include "SIO/Memcard/MemoryCardFolder.h"
@@ -699,6 +700,11 @@ void FileMcd_Swap()
 
 s32 FileMcd_IsPresent(uint port, uint slot)
 {
+	// Rollback fork: no memory cards during netplay. Both peers must see the same cards, and the local
+	// card files differ between machines (or are locked by a second local instance).
+	if (Netplay::IsActive())
+		return false;
+
 	const uint combinedSlot = FileMcd_ConvertToSlot(port, slot);
 	switch (EmuConfig.Mcd[combinedSlot].Type)
 	{

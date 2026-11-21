@@ -20,6 +20,7 @@
   <ImportGroup Label="PropertySheets">
     <Import Project="$(SolutionDir)common\vsprops\common.props" />
     <Import Project="$(SolutionDir)common\vsprops\GenerateSCMVersion.props" />
+    <Import Project="$(SolutionDir)3rdparty\ggrs-capi\ggrs-capi.props" />
     <Import Condition="$(Configuration.Contains(Debug))" Project="$(SolutionDir)common\vsprops\CodeGen_Debug.props" />
     <Import Condition="$(Configuration.Contains(Devel))" Project="$(SolutionDir)common\vsprops\CodeGen_Devel.props" />
     <Import Condition="$(Configuration.Contains(Release))" Project="$(SolutionDir)common\vsprops\CodeGen_Release.props" />
@@ -289,6 +290,7 @@
     <ClCompile Include="Recording\InputRecordingControls.cpp" />
     <ClCompile Include="Recording\InputRecordingFile.cpp" />
     <ClCompile Include="Recording\PadData.cpp" />
+    <ClCompile Include="Rollback\Netplay.cpp" />
     <ClCompile Include="Rollback\Rollback.cpp" />
     <ClCompile Include="Rollback\RollbackTest.cpp" />
     <ClCompile Include="Recording\Utilities\InputRecordingLogger.cpp" />
@@ -738,6 +740,7 @@
     <ClInclude Include="Recording\InputRecordingControls.h" />
     <ClInclude Include="Recording\InputRecordingFile.h" />
     <ClInclude Include="Recording\PadData.h" />
+    <ClInclude Include="Rollback\Netplay.h" />
     <ClInclude Include="Rollback\Rollback.h" />
     <ClInclude Include="Rollback\RollbackTest.h" />
     <ClInclude Include="Recording\Utilities\InputRecordingLogger.h" />
