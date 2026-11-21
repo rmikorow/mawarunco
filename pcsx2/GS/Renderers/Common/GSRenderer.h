@@ -31,6 +31,9 @@ protected:
 	virtual GSTexture* GetFeedbackOutput(float& scale) { return nullptr; }
 
 public:
+	// Rollback fork: set by GSvsync() for resimulated frames, which are emulated but not presented.
+	bool m_skip_present = false;
+
 	GSRenderer();
 	virtual ~GSRenderer();
 

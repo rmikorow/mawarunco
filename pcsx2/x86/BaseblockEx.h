@@ -145,6 +145,10 @@ protected:
 
 	// switch to a hash map later?
 	std::multimap<u32, uptr> links;
+	// Rollback fork: jump site -> target pc, for every entry in links. Remove() uses it to drop the links
+	// that originate in a removed block. Without that, links of dead code piled up with every recompile
+	// and New()/Remove() patched more and more stale jump sites (rollback recompiles a lot).
+	std::map<uptr, u32> link_sources;
 	uptr recompiler;
 	BaseBlockArray blocks;
 
@@ -213,7 +217,19 @@ public:
 			}
 		} while (idx++ < last);
 
-		// TODO: remove links from this block?
+		// Rollback fork: remove the links from these blocks (their code is dead now).
+		for (idx = first; idx <= last; idx++)
+		{
+			const uptr code_start = blocks[idx].fnptr;
+			const uptr code_end = code_start + blocks[idx].x86size;
+			auto src = link_sources.lower_bound(code_start);
+			while (src != link_sources.end() && src->first < code_end)
+			{
+				EraseLink(src->second, src->first);
+				src = link_sources.erase(src);
+			}
+		}
+
 		blocks.erase(first, last + 1);
 	}
 
@@ -223,6 +239,21 @@ public:
 	{
 		blocks.clear();
 		links.clear();
+		link_sources.clear();
+	}
+
+private:
+	void EraseLink(u32 pc, uptr jumpptr)
+	{
+		std::pair<linkiter_t, linkiter_t> range = links.equal_range(pc);
+		for (linkiter_t i = range.first; i != range.second; ++i)
+		{
+			if (i->second == jumpptr)
+			{
+				links.erase(i);
+				return;
+			}
+		}
 	}
 };
 

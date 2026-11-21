@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "Rollback/RollbackTest.h"
 #include "R3000A.h"
 #include "Common.h"
 
@@ -126,6 +127,9 @@ __fi int psxRemainingCycles(IopEventId n)
 
 __fi void PSX_INT( IopEventId n, s32 ecycle )
 {
+	if (RollbackTest::g_trace_timers) [[unlikely]]
+		RollbackTest::TraceTimerRead(3, n, psxRegs.pc, psxRegs.cycle, static_cast<u32>(ecycle));
+
 	// 19 is CDVD read int, it's supposed to be high.
 	//if (ecycle > 8192 && n != 19)
 	//	DevCon.Warning( "IOP cycles high: %d, n %d", ecycle, n );

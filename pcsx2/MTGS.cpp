@@ -4,6 +4,7 @@
 #include "GS.h"
 #include "Gif_Unit.h"
 #include "MTGS.h"
+#include "Rollback/RollbackTest.h"
 #include "MTVU.h"
 #include "Host.h"
 #include "IconsFontAwesome.h"
@@ -252,6 +253,9 @@ void MTGS::PostVsyncStart(bool registers_written)
 	remainder[1] = GSIMR._u32;
 	(GSRegSIGBLID&)remainder[2] = GSSIGLBLID;
 	remainder[4] = static_cast<u32>(registers_written);
+	// Rollback fork: resimulated frames are emulated by the GS but not presented. The flag travels with
+	// the packet because the GS thread runs behind the CPU thread.
+	remainder[5] = static_cast<u32>(RollbackTest::g_resimulating);
 	s_packet_writepos = (s_packet_writepos + 2) & RingBufferMask;
 
 	SendDataPacket();
@@ -500,7 +504,7 @@ void MTGS::MainLoop()
 							((GSRegSIGBLID&)RingBuffer.Regs[0x1080]) = (GSRegSIGBLID&)remainder[2];
 
 							// CSR & 0x2000; is the pageflip id.
-							GSvsync((((u32&)RingBuffer.Regs[0x1000]) & 0x2000) ? 0 : 1, remainder[4] != 0);
+							GSvsync((((u32&)RingBuffer.Regs[0x1000]) & 0x2000) ? 0 : 1, remainder[4] != 0, remainder[5] != 0);
 
 							s_QueuedFrameCount.fetch_sub(1);
 							if (s_VsyncSignalListener.exchange(false))

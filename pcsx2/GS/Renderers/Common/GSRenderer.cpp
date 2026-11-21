@@ -636,7 +636,8 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 	m_last_transfer_n = s_transfer_n;
 
 	// Skip presentation when running uncapped while vsync is on.
-	if (skip_frame || g_gs_device->ShouldSkipPresentingFrame())
+	// Rollback fork: also skip it for resimulated frames.
+	if (skip_frame || m_skip_present || g_gs_device->ShouldSkipPresentingFrame())
 	{
 		if (BeginPresentFrame(true))
 			EndPresentFrame();

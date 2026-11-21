@@ -51,6 +51,10 @@ namespace RollbackTest
 	/// Cancels a running test (state load, reset, shutdown).
 	void Abort();
 
+	/// True while frames are resimulated after a rollback (CPU thread). The frame limiter, GS
+	/// presentation and audio output are skipped meanwhile; emulation itself is unchanged.
+	extern bool g_resimulating;
+
 	/// Diagnostics: timer reads are traced while this is set (first frames of both passes).
 	extern bool g_trace_timers;
 	/// unit 0 = EE, 1 = IOP. pc is the last written PC (usually the block start in the recompilers).

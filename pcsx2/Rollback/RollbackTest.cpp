@@ -25,6 +25,7 @@
 
 #include "fmt/format.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <memory>
@@ -54,11 +55,15 @@ namespace RollbackTest
 	struct Extras
 	{
 		u32 ee_cycle_frac = 0;
+		// Set at the end of an EE event test and consumed by the next one (runs the IOP even when it is
+		// ahead). Snapshots are taken in between, and the savestate format does not include it.
+		bool iop_event_action = false;
 		std::vector<u8> spu2_voice_buffers;
 
 		bool operator==(const Extras& o) const
 		{
-			return ee_cycle_frac == o.ee_cycle_frac && spu2_voice_buffers == o.spu2_voice_buffers;
+			return ee_cycle_frac == o.ee_cycle_frac && iop_event_action == o.iop_event_action &&
+				   spu2_voice_buffers == o.spu2_voice_buffers;
 		}
 	};
 	static Extras s_start_extras;
@@ -68,6 +73,7 @@ namespace RollbackTest
 	{
 		Extras e;
 		e.ee_cycle_frac = g_eeCycleFrac;
+		e.iop_event_action = iopEventAction;
 		SPU2::SaveVoiceBuffers(e.spu2_voice_buffers);
 		return e;
 	}
@@ -75,6 +81,7 @@ namespace RollbackTest
 	static void RestoreExtras(const Extras& e)
 	{
 		g_eeCycleFrac = e.ee_cycle_frac;
+		iopEventAction = e.iop_event_action;
 		SPU2::LoadVoiceBuffers(e.spu2_voice_buffers);
 	}
 	static std::vector<PadData> s_inputs; // (s_num_frames + 1) * NUM_PORTS entries
@@ -87,7 +94,37 @@ namespace RollbackTest
 	// taking a snapshot has no side effect on emulation.
 	static constexpr u32 RING_SIZE = 8;
 	static std::array<ArchiveEntryList, RING_SIZE> s_ring;
+	static std::array<Extras, RING_SIZE> s_ring_extras;
 	static bool s_ring_enabled = true;
+
+	// Resimulation benchmark: every s_resim_interval frames of the recording pass, roll back
+	// s_resim_depth frames (restore the ring snapshot) and resimulate them with the recorded input at
+	// full speed, without presentation or audio. Each resimulated frame is compared with the snapshot
+	// taken the first time. The recording pass then continues, so its end state (after many rollbacks)
+	// is also compared with the replay pass, which has none.
+	static u32 s_resim_depth = 0; // 0 = off
+	static u32 s_resim_interval = 1;
+	static bool s_resim_active = false;
+	static bool s_resim_suppress_output = true; // diagnostics: false keeps limiter, presentation and audio
+	static u32 s_resim_target = 0; // frame at which the resimulation ends
+	static Common::Timer s_resim_timer;
+	static double s_resim_snap_ms = 0.0;
+	static ArchiveEntryList s_resim_scratch;
+	struct ResimStats
+	{
+		u32 rollbacks = 0;
+		u32 frames = 0;
+		u32 mismatched_frames = 0;
+		double total_ms = 0.0;
+		double max_ms = 0.0;
+		double restore_ms = 0.0;
+		double snapshot_ms = 0.0;
+	};
+	static ResimStats s_resim_stats;
+	static void StartResim();
+	static void ResimFrameDone();
+	static void LogResimStats();
+	static bool SameSnapshot(const ArchiveEntryList& a, const ArchiveEntryList& b, const char** first_diff);
 	struct SnapshotStats
 	{
 		u32 count = 0;
@@ -174,6 +211,13 @@ namespace RollbackTest
 		u32 value;
 	};
 	static std::vector<TimerRead> s_timer_rec;
+
+	// Resimulation diagnostics: per-frame event trace (timer reads and interrupt scheduling) of the first
+	// run of each frame and of its resimulation. Shows the first event that differs.
+	static bool s_evtrace_on = false;
+	static std::vector<TimerRead> s_evtrace_cur;
+	static std::array<std::vector<TimerRead>, 8> s_evtrace_first;
+	static void CompareEventTraces(const std::vector<TimerRead>& first, const std::vector<TimerRead>& resim);
 	static std::vector<TimerRead> s_timer_replay;
 	static bool s_timer_compared = false;
 	static void UpdateTimerTrace();
@@ -198,12 +242,48 @@ namespace RollbackTest
 } // namespace RollbackTest
 
 bool RollbackTest::g_trace_timers = false;
+bool RollbackTest::g_resimulating = false;
 
 void RollbackTest::TraceTimerRead(u32 unit, u32 index, u32 pc, u64 cycle, u32 value)
 {
+	if (s_evtrace_on)
+	{
+		if (s_evtrace_cur.size() < 65536)
+			s_evtrace_cur.push_back(TimerRead{s_frame, unit, index, pc, cycle, value});
+		return;
+	}
+	if (unit >= 2)
+		return; // interrupt scheduling is only traced for resimulation diagnostics
 	std::vector<TimerRead>& v = (s_phase == Phase::Recording) ? s_timer_rec : s_timer_replay;
 	if (v.size() < 4096)
 		v.push_back(TimerRead{s_frame, unit, index, pc, cycle, value});
+}
+
+void RollbackTest::CompareEventTraces(const std::vector<TimerRead>& first, const std::vector<TimerRead>& resim)
+{
+	static constexpr const char* kinds[] = {"EE timer read", "IOP timer read", "EE int sched", "IOP int sched"};
+	const size_t n = std::min(first.size(), resim.size());
+	size_t i = 0;
+	for (; i < n; i++)
+	{
+		const TimerRead& a = first[i];
+		const TimerRead& b = resim[i];
+		if (a.unit != b.unit || a.index != b.index || a.pc != b.pc || a.cycle != b.cycle || a.value != b.value)
+			break;
+	}
+	Console.Error(fmt::format("  event trace: {} events first run, {} resimulated, first difference at #{}",
+		first.size(), resim.size(), i));
+	const size_t from = (i > 4) ? i - 4 : 0;
+	for (size_t k = from; k < std::min(i + 6, std::max(first.size(), resim.size())); k++)
+	{
+		auto fmt_ev = [](const std::vector<TimerRead>& v, size_t k) {
+			if (k >= v.size())
+				return std::string("-");
+			const TimerRead& e = v[k];
+			return fmt::format("{} {} pc {:08x} cyc {} val {}", kinds[e.unit], e.index, e.pc, e.cycle, e.value);
+		};
+		Console.Error(fmt::format("    #{} {}{}  |  {}", k, (k == i) ? "> " : "", fmt_ev(first, k), fmt_ev(resim, k)));
+	}
 }
 
 // Tracing covers the emulated segments 0..TIMER_TRACE_FRAMES-1 after S0 (segment k runs from the exit
@@ -213,7 +293,7 @@ void RollbackTest::UpdateTimerTrace()
 {
 	const bool active = (s_phase != Phase::Idle) && s_frame >= 1;
 	const u32 segment = active ? s_frame - 1 : 0;
-	g_trace_timers = active && segment < TIMER_TRACE_FRAMES;
+	g_trace_timers = (active && segment < TIMER_TRACE_FRAMES) || s_evtrace_on;
 	if (s_phase == Phase::Replaying && active && segment >= TIMER_TRACE_FRAMES && !s_timer_compared)
 		CompareTimerTraces();
 }
@@ -285,6 +365,11 @@ void RollbackTest::Finish()
 	s_inputs.clear();
 	s_inputs.shrink_to_fit();
 	s_trace.clear();
+	s_resim_active = false;
+	g_resimulating = false;
+	s_evtrace_on = false;
+	s_resim_scratch.Clear();
+	ArchiveEntryList::VmStateBuffer().swap(s_resim_scratch.GetBuffer());
 	for (ArchiveEntryList& slot : s_ring)
 	{
 		slot.Clear();
@@ -412,6 +497,7 @@ void RollbackTest::TakeRingSnapshot()
 		Console.Error(fmt::format("Rollback test: ring snapshot failed: {}", error.GetDescription()));
 		return;
 	}
+	s_ring_extras[s_frame % RING_SIZE] = CaptureExtras();
 	const double ms = timer.GetTimeMilliseconds();
 
 	// The first round fills the ring (buffer allocation), only reused buffers are measured.
@@ -444,6 +530,109 @@ void RollbackTest::LogSnapshotStats()
 			Console.WriteLn(fmt::format("  {:<32} avg {:.3f} ms, max {:.3f} ms", SaveState_GetTimedPartName(i), avg,
 				st.part_max_ms[i]));
 	}
+}
+
+void RollbackTest::StartResim()
+{
+	const u32 from = s_frame - s_resim_depth;
+	s_resim_target = s_frame;
+	s_resim_timer.Reset();
+
+	Error error;
+	if (!SaveState_LoadFromMemory(s_ring[from % RING_SIZE], &error, false))
+	{
+		Console.Error(fmt::format("Rollback test: rollback restore failed: {}", error.GetDescription()));
+		Finish();
+		return;
+	}
+	RestoreExtras(s_ring_extras[from % RING_SIZE]);
+	s_resim_stats.restore_ms += s_resim_timer.GetTimeMilliseconds();
+	s_resim_snap_ms = 0.0;
+
+	// Same convention as the replay pass: the restored snapshot is frame 'from', the input of that frame
+	// is re-applied by OnBeforeExecute(), the next poll is frame from + 1.
+	s_frame = from + 1;
+	s_resim_active = true;
+	g_resimulating = s_resim_suppress_output;
+}
+
+void RollbackTest::ResimFrameDone()
+{
+	// A rollback implementation snapshots every resimulated frame, so the benchmark does too. The snapshot
+	// goes into a scratch buffer first and is compared with the one taken when the frame first ran.
+	Common::Timer timer;
+	Error error;
+	const bool ok = SaveState_DownloadStateInto(s_resim_scratch, &error);
+	const Extras extras = CaptureExtras();
+	s_resim_snap_ms += timer.GetTimeMilliseconds();
+	s_resim_stats.frames++;
+
+	const u32 slot = s_frame % RING_SIZE;
+	const char* first_diff = nullptr;
+	if (!ok || !SameSnapshot(s_ring[slot], s_resim_scratch, &first_diff) || !(extras == s_ring_extras[slot]))
+	{
+		s_resim_stats.mismatched_frames++;
+		if (s_resim_stats.mismatched_frames <= 5)
+		{
+			Console.Error(fmt::format("Rollback test: resimulated frame {} (rollback at {}) differs: {}", s_frame,
+				s_resim_target, ok ? (first_diff ? first_diff : "extras") : "snapshot failed"));
+			// Details (and dumps) for the first one.
+			if (ok && s_resim_stats.mismatched_frames == 1)
+				CompareSnapshots(s_ring[slot], s_resim_scratch);
+			if (s_evtrace_on)
+				CompareEventTraces(s_evtrace_first[slot], s_evtrace_cur);
+		}
+	}
+
+	s_evtrace_cur.clear();
+	if (s_frame < s_resim_target)
+	{
+		s_frame++;
+		return;
+	}
+
+	// Back at the frame where the rollback started. Continue the recording pass from there.
+	const double ms = s_resim_timer.GetTimeMilliseconds();
+	s_resim_stats.rollbacks++;
+	s_resim_stats.total_ms += ms;
+	s_resim_stats.max_ms = std::max(s_resim_stats.max_ms, ms);
+	s_resim_stats.snapshot_ms += s_resim_snap_ms;
+	s_resim_active = false;
+	g_resimulating = false;
+	s_frame++;
+}
+
+bool RollbackTest::SameSnapshot(const ArchiveEntryList& a, const ArchiveEntryList& b, const char** first_diff)
+{
+	if (a.GetLength() != b.GetLength())
+		return false;
+	for (size_t i = 0; i < a.GetLength(); i++)
+	{
+		const ArchiveEntry& ea = a[i];
+		const ArchiveEntry& eb = b[i];
+		if (ea.GetDataSize() != eb.GetDataSize() ||
+			std::memcmp(a.GetPtr(ea.GetDataIndex()), b.GetPtr(eb.GetDataIndex()), ea.GetDataSize()) != 0)
+		{
+			*first_diff = ea.GetFilename().c_str();
+			return false;
+		}
+	}
+	return true;
+}
+
+void RollbackTest::LogResimStats()
+{
+	const ResimStats& st = s_resim_stats;
+	if (st.rollbacks == 0)
+		return;
+
+	const double avg = st.total_ms / st.rollbacks;
+	const double restore = st.restore_ms / st.rollbacks;
+	const double snaps = st.snapshot_ms / st.rollbacks;
+	const double emulate_per_frame = (st.total_ms - st.restore_ms - st.snapshot_ms) / st.frames;
+	Console.WriteLn(fmt::format("RESIM STATS: {} rollbacks of {} frames, avg {:.2f} ms (restore {:.2f}, snapshots {:.2f}, "
+								"emulation {:.2f} per frame), max {:.2f} ms, {} of {} resimulated frames differ",
+		st.rollbacks, s_resim_depth, avg, restore, snaps, emulate_per_frame, st.max_ms, st.mismatched_frames, st.frames));
 }
 
 void RollbackTest::AutoTestTick()
@@ -515,6 +704,16 @@ void RollbackTest::OnInputPolled()
 		s_trace.reserve(s_num_frames + 1);
 		s_snap_stats = {};
 		s_ring_enabled = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "SnapshotEveryFrame", true);
+		s_resim_depth = static_cast<u32>(std::clamp(Host::GetBaseIntSettingValue("EmuCore/Rollback", "ResimDepth", 0), 0,
+			static_cast<int>(RING_SIZE) - 1));
+		s_resim_interval = static_cast<u32>(std::max(Host::GetBaseIntSettingValue("EmuCore/Rollback", "ResimInterval", 1), 1));
+		if (s_resim_depth > 0)
+			s_ring_enabled = true;
+		s_resim_active = false;
+		s_evtrace_on = (s_resim_depth > 0) && Host::GetBaseBoolSettingValue("EmuCore/Rollback", "ResimEventTrace", false);
+		s_evtrace_cur.clear();
+		s_resim_suppress_output = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "ResimSuppressOutput", true);
+		s_resim_stats = {};
 		s_trace_mismatches = 0;
 		s_input_changed_frames = 0;
 		s_timer_rec.clear();
@@ -526,7 +725,7 @@ void RollbackTest::OnInputPolled()
 	// Only the input is handled here. Snapshots and restores must not happen in the middle of the
 	// vsync event: the counters are half-updated and callers hold state in locals. They are done in
 	// OnExecutionExited(), after the event test has completed.
-	if (s_phase == Phase::Recording)
+	if (s_phase == Phase::Recording && !s_resim_active)
 	{
 		// Input for the frame that starts now. Frame s_num_frames is recorded too, because the
 		// pad state at the end point is part of the end snapshot.
@@ -592,6 +791,12 @@ void RollbackTest::OnExecutionExited()
 	if (!std::exchange(s_exit_pending, false) || s_phase == Phase::Idle)
 		return;
 
+	if (s_phase == Phase::Recording && s_resim_active)
+	{
+		ResimFrameDone();
+		return;
+	}
+
 	if (s_phase == Phase::Recording)
 	{
 		if (s_frame == 0)
@@ -627,10 +832,23 @@ void RollbackTest::OnExecutionExited()
 				fmt::format("Rollback test: recording {} frames...", s_num_frames), Host::OSD_INFO_DURATION);
 		}
 
+		if (s_evtrace_on)
+		{
+			s_evtrace_first[s_frame % RING_SIZE].swap(s_evtrace_cur);
+			s_evtrace_cur.clear();
+		}
 		s_trace.push_back(TakeTrace());
 		CopyRam(s_frame);
 		if (s_frame > 0 && s_ring_enabled)
 			TakeRingSnapshot();
+
+		// Roll back from here, unless the end point is close (the end snapshot is taken normally).
+		if (s_resim_depth > 0 && s_frame > RING_SIZE && s_frame + 1 < s_num_frames &&
+			(s_frame % s_resim_interval) == 0)
+		{
+			StartResim();
+			return;
+		}
 
 		if (s_frame < s_num_frames)
 		{
@@ -685,6 +903,7 @@ void RollbackTest::OnExecutionExited()
 		Console.WriteLn(fmt::format("Rollback test: {} of {} frames diverged during replay, host input changed the pad after the poll in {} frames",
 			s_trace_mismatches, s_num_frames + 1, s_input_changed_frames));
 		LogSnapshotStats();
+		LogResimStats();
 		bool same = CompareSnapshots(*s_end_state, *replay_state);
 		const Extras replay_extras = CaptureExtras();
 		if (replay_extras.ee_cycle_frac != s_end_extras.ee_cycle_frac)
@@ -807,7 +1026,10 @@ bool RollbackTest::CompareSnapshots(const ArchiveEntryList& a, const ArchiveEntr
 		DumpEntry("replay", eb.GetFilename(), pb, size);
 
 		// Detail for EE RAM: list the first differing 16-byte lines (offset = PS2 physical address).
-		if (ea.GetFilename() == "eeMemory.bin")
+		// Same for IOP RAM and the internal structures, with the bytes of both sides.
+		const bool show_bytes = (ea.GetFilename() != "eeMemory.bin");
+		if (ea.GetFilename() == "eeMemory.bin" || ea.GetFilename() == "iopMemory.bin" ||
+			ea.GetFilename() == "PCSX2 Internal Structures.dat")
 		{
 			u32 shown = 0;
 			for (u32 line = first & ~15u; line <= last && shown < 32; line += 16)
@@ -815,7 +1037,20 @@ bool RollbackTest::CompareSnapshots(const ArchiveEntryList& a, const ArchiveEntr
 				const u32 n = std::min<u32>(16, size - line);
 				if (std::memcmp(pa + line, pb + line, n) != 0)
 				{
-					Console.Error(fmt::format("    {:08x}", line));
+					if (show_bytes)
+					{
+						std::string ha, hb;
+						for (u32 k = 0; k < n; k++)
+						{
+							ha += fmt::format("{:02x}", pa[line + k]);
+							hb += fmt::format("{:02x}", pb[line + k]);
+						}
+						Console.Error(fmt::format("    {:08x} {} | {}", line, ha, hb));
+					}
+					else
+					{
+						Console.Error(fmt::format("    {:08x}", line));
+					}
 					shown++;
 				}
 			}

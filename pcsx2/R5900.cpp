@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "Rollback/RollbackTest.h"
 #include "Common.h"
 
 #include "common/Path.h"
@@ -525,6 +526,9 @@ __fi void CPU_SET_DMASTALL(EE_EventType n, bool set)
 
 __fi void CPU_INT( EE_EventType n, s32 ecycle)
 {
+	if (RollbackTest::g_trace_timers) [[unlikely]]
+		RollbackTest::TraceTimerRead(2, n, cpuRegs.pc, cpuRegs.cycle, static_cast<u32>(ecycle));
+
 	// If it's retunning too quick, just rerun the DMA, there's no point in running the EE for < 4 cycles.
 	// This causes a huge uplift in performance for ONI FMV's.
 	if (ecycle < 4 && !(cpuRegs.dmastall & (1 << n)) && eeRunInterruptScan != INT_NOT_RUNNING)

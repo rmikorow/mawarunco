@@ -2277,7 +2277,7 @@ void VMManager::ResetFrameLimiter()
 
 void VMManager::Internal::Throttle()
 {
-	if (s_target_speed == 0.0f || s_use_vsync_for_timing)
+	if (s_target_speed == 0.0f || s_use_vsync_for_timing || RollbackTest::g_resimulating)
 		return;
 
 	const u64 uExpectedEnd =

@@ -64,5 +64,12 @@ void BaseBlocks::Link(u32 pc, s32* jumpptr)
 		*jumpptr = (s32)(targetblock->fnptr - (sptr)(jumpptr + 1));
 	else
 		*jumpptr = (s32)(recompiler - (sptr)(jumpptr + 1));
+	// Rollback fork: a jump site is linked once; if it is linked again, replace the old entry.
+	const auto [src, inserted] = link_sources.try_emplace((uptr)jumpptr, pc);
+	if (!inserted)
+	{
+		EraseLink(src->second, (uptr)jumpptr);
+		src->second = pc;
+	}
 	links.insert(std::pair<u32, uptr>(pc, (uptr)jumpptr));
 }
