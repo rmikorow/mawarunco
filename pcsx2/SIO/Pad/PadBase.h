@@ -62,4 +62,11 @@ public: // Public members
 	virtual bool Freeze(StateWrapper& sw);
 
 	virtual u8 SendCommandByte(u8 commandByte) = 0;
+
+	// Rollback fork: input injection (netplay). While an input is injected, the game only sees that input.
+	// Host input keeps updating the live state, which CaptureLiveInput() returns, but does not reach the game.
+	virtual bool SupportsInputInjection() const { return false; }
+	virtual Pad::FrameInput CaptureLiveInput() const { return {}; }
+	virtual void SetInjectedInput(const Pad::FrameInput* input) {}
+	virtual const Pad::FrameInput* GetInjectedInput() const { return nullptr; }
 };

@@ -4,13 +4,26 @@
 #include "Rollback/Rollback.h"
 
 #include "R3000A.h"
+#include "SIO/Pad/Pad.h"
+#include "SIO/Pad/PadBase.h"
+#include "SIO/Sio.h"
 #include "SPU2/spu2.h"
 
+#include "common/Assertions.h"
 #include "common/Error.h"
+
+#include "fmt/format.h"
 
 #include <cstring>
 
 bool Rollback::g_resimulating = false;
+
+static bool s_input_injection = false;
+
+static PadBase* GetPortPad(u32 port)
+{
+	return Pad::GetPad(sioConvertPortAndSlotToPad(port, 0));
+}
 
 void Rollback::Snapshot::Release()
 {
@@ -26,6 +39,9 @@ bool Rollback::Save(Snapshot& snapshot, Error* error)
 
 	snapshot.iop_event_action = iopEventAction;
 	SPU2::SaveVoiceBuffers(snapshot.spu2_voice_buffers);
+	snapshot.inputs_injected = s_input_injection;
+	for (u32 port = 0; port < NUM_PORTS; port++)
+		snapshot.inputs[port] = s_input_injection ? GetInput(port) : PadInput{};
 	return true;
 }
 
@@ -42,6 +58,70 @@ void Rollback::LoadExtras(const Snapshot& snapshot)
 {
 	iopEventAction = snapshot.iop_event_action;
 	SPU2::LoadVoiceBuffers(snapshot.spu2_voice_buffers);
+	if (s_input_injection && snapshot.inputs_injected)
+	{
+		for (u32 port = 0; port < NUM_PORTS; port++)
+			SetInput(port, snapshot.inputs[port]);
+	}
+}
+
+bool Rollback::BeginInputInjection(Error* error)
+{
+	for (u32 port = 0; port < NUM_PORTS; port++)
+	{
+		// An empty port stays empty (the game sees no controller there), it needs no injection.
+		const PadBase* pad = GetPortPad(port);
+		if (!pad || pad->GetType() == Pad::ControllerType::NotConnected)
+			continue;
+		if (!pad->SupportsInputInjection())
+		{
+			Error::SetString(error, fmt::format("Controller port {} does not support rollback input (use a DualShock 2).", port + 1));
+			return false;
+		}
+	}
+
+	s_input_injection = true;
+	for (u32 port = 0; port < NUM_PORTS; port++)
+		SetInput(port, PadInput{});
+	return true;
+}
+
+void Rollback::EndInputInjection()
+{
+	if (!s_input_injection)
+		return;
+
+	s_input_injection = false;
+	for (u32 port = 0; port < NUM_PORTS; port++)
+	{
+		if (PadBase* pad = GetPortPad(port))
+			pad->SetInjectedInput(nullptr);
+	}
+}
+
+bool Rollback::IsInputInjectionActive()
+{
+	return s_input_injection;
+}
+
+Rollback::PadInput Rollback::CaptureLocalInput(u32 port)
+{
+	const PadBase* pad = GetPortPad(port);
+	return pad ? pad->CaptureLiveInput() : PadInput{};
+}
+
+void Rollback::SetInput(u32 port, const PadInput& input)
+{
+	pxAssert(s_input_injection);
+	if (PadBase* pad = GetPortPad(port))
+		pad->SetInjectedInput(&input);
+}
+
+Rollback::PadInput Rollback::GetInput(u32 port)
+{
+	const PadBase* pad = GetPortPad(port);
+	const PadInput* input = pad ? pad->GetInjectedInput() : nullptr;
+	return input ? *input : PadInput{};
 }
 
 const char* Rollback::FirstDifference(const Snapshot& a, const Snapshot& b)
@@ -69,5 +149,7 @@ const char* Rollback::FirstExtrasDifference(const Snapshot& a, const Snapshot& b
 		return "iopEventAction";
 	if (a.spu2_voice_buffers != b.spu2_voice_buffers)
 		return "SPU2 voice buffers";
+	if (a.inputs_injected != b.inputs_injected || a.inputs != b.inputs)
+		return "injected input";
 	return nullptr;
 }

@@ -202,7 +202,8 @@ u8 PadDualshock2::ButtonQuery(u8 commandByte)
 
 u8 PadDualshock2::Poll(u8 commandByte)
 {
-	const u32 buttons = GetButtons();
+	// Rollback fork: an injected input replaces the live state.
+	const u32 buttons = injectedInput ? (0xffff0000u | injectedInput->buttons) : GetButtons();
 	u8 largeMotor = 0x00;
 	u8 smallMotor = 0x00;
 
@@ -258,40 +259,40 @@ u8 PadDualshock2::Poll(u8 commandByte)
 
 			return buttons & 0xff;
 		case 5:
-			return GetPressure(Inputs::PAD_R_RIGHT);
+			return GetPollPressure(Inputs::PAD_R_RIGHT);
 		case 6:
-			return GetPressure(Inputs::PAD_R_UP);
+			return GetPollPressure(Inputs::PAD_R_UP);
 		case 7:
-			return GetPressure(Inputs::PAD_L_RIGHT);
+			return GetPollPressure(Inputs::PAD_L_RIGHT);
 		case 8:
 			// PS1 mode: If the controller reaches this byte, it is in analog mode and has irrefutably reached the last byte.
 			// There's simply nothing to check, we know it's done and time to stop acknowledgements.
 			g_Sio0.SetAcknowledge(false);
-			return GetPressure(Inputs::PAD_L_UP);
+			return GetPollPressure(Inputs::PAD_L_UP);
 		case 9:
-			return IsButtonBitSet(buttons, 13) ? GetPressure(Inputs::PAD_RIGHT) : 0;
+			return IsButtonBitSet(buttons, 13) ? GetPollPressure(Inputs::PAD_RIGHT) : 0;
 		case 10:
-			return IsButtonBitSet(buttons, 15) ? GetPressure(Inputs::PAD_LEFT) : 0;
+			return IsButtonBitSet(buttons, 15) ? GetPollPressure(Inputs::PAD_LEFT) : 0;
 		case 11:
-			return IsButtonBitSet(buttons, 12) ? GetPressure(Inputs::PAD_UP) : 0;
+			return IsButtonBitSet(buttons, 12) ? GetPollPressure(Inputs::PAD_UP) : 0;
 		case 12:
-			return IsButtonBitSet(buttons, 14) ? GetPressure(Inputs::PAD_DOWN) : 0;
+			return IsButtonBitSet(buttons, 14) ? GetPollPressure(Inputs::PAD_DOWN) : 0;
 		case 13:
-			return IsButtonBitSet(buttons, 4) ? GetPressure(Inputs::PAD_TRIANGLE) : 0;
+			return IsButtonBitSet(buttons, 4) ? GetPollPressure(Inputs::PAD_TRIANGLE) : 0;
 		case 14:
-			return IsButtonBitSet(buttons, 5) ? GetPressure(Inputs::PAD_CIRCLE) : 0;
+			return IsButtonBitSet(buttons, 5) ? GetPollPressure(Inputs::PAD_CIRCLE) : 0;
 		case 15:
-			return IsButtonBitSet(buttons, 6) ? GetPressure(Inputs::PAD_CROSS) : 0;
+			return IsButtonBitSet(buttons, 6) ? GetPollPressure(Inputs::PAD_CROSS) : 0;
 		case 16:
-			return IsButtonBitSet(buttons, 7) ? GetPressure(Inputs::PAD_SQUARE) : 0;
+			return IsButtonBitSet(buttons, 7) ? GetPollPressure(Inputs::PAD_SQUARE) : 0;
 		case 17:
-			return IsButtonBitSet(buttons, 2) ? GetPressure(Inputs::PAD_L1) : 0;
+			return IsButtonBitSet(buttons, 2) ? GetPollPressure(Inputs::PAD_L1) : 0;
 		case 18:
-			return IsButtonBitSet(buttons, 3) ? GetPressure(Inputs::PAD_R1) : 0;
+			return IsButtonBitSet(buttons, 3) ? GetPollPressure(Inputs::PAD_R1) : 0;
 		case 19:
-			return IsButtonBitSet(buttons, 0) ? GetPressure(Inputs::PAD_L2) : 0;
+			return IsButtonBitSet(buttons, 0) ? GetPollPressure(Inputs::PAD_L2) : 0;
 		case 20:
-			return IsButtonBitSet(buttons, 1) ? GetPressure(Inputs::PAD_R2) : 0;
+			return IsButtonBitSet(buttons, 1) ? GetPollPressure(Inputs::PAD_R2) : 0;
 	}
 	
 	Console.Warning("%s(%02X) Did not reach a valid return path! Returning zero as a failsafe!", __FUNCTION__, commandByte);
@@ -679,7 +680,9 @@ void PadDualshock2::Set(u32 index, float value)
 			}
 		}
 
-		if (index == Inputs::PAD_ANALOG && !this->analogPressed && value > 0)
+		// Rollback fork: the analog button changes the controller mode (part of the emulated state), so host
+		// input must not toggle it while inputs are injected.
+		if (index == Inputs::PAD_ANALOG && !this->analogPressed && value > 0 && !injectedInput)
 		{
 			this->analogPressed = true;
 
@@ -851,6 +854,72 @@ u8 PadDualshock2::GetPressure(u32 index) const
 		default:
 			return this->rawInputs[index];
 	}
+}
+
+u8 PadDualshock2::GetPollPressure(u32 index) const
+{
+	if (!injectedInput)
+		return GetPressure(index);
+
+	const Pad::FrameInput& in = *injectedInput;
+	switch (index)
+	{
+		case Inputs::PAD_R_LEFT:
+		case Inputs::PAD_R_RIGHT:
+			return in.rx;
+		case Inputs::PAD_R_DOWN:
+		case Inputs::PAD_R_UP:
+			return in.ry;
+		case Inputs::PAD_L_LEFT:
+		case Inputs::PAD_L_RIGHT:
+			return in.lx;
+		case Inputs::PAD_L_DOWN:
+		case Inputs::PAD_L_UP:
+			return in.ly;
+		case Inputs::PAD_RIGHT: return in.pressures[0];
+		case Inputs::PAD_LEFT: return in.pressures[1];
+		case Inputs::PAD_UP: return in.pressures[2];
+		case Inputs::PAD_DOWN: return in.pressures[3];
+		case Inputs::PAD_TRIANGLE: return in.pressures[4];
+		case Inputs::PAD_CIRCLE: return in.pressures[5];
+		case Inputs::PAD_CROSS: return in.pressures[6];
+		case Inputs::PAD_SQUARE: return in.pressures[7];
+		case Inputs::PAD_L1: return in.pressures[8];
+		case Inputs::PAD_R1: return in.pressures[9];
+		case Inputs::PAD_L2: return in.pressures[10];
+		case Inputs::PAD_R2: return in.pressures[11];
+		default:
+			return 0;
+	}
+}
+
+Pad::FrameInput PadDualshock2::CaptureLiveInput() const
+{
+	Pad::FrameInput in;
+	in.buttons = static_cast<u16>(buttons & 0xffffu);
+	in.rx = analogs.rx;
+	in.ry = analogs.ry;
+	in.lx = analogs.lx;
+	in.ly = analogs.ly;
+	static constexpr u32 pressure_inputs[12] = {Inputs::PAD_RIGHT, Inputs::PAD_LEFT, Inputs::PAD_UP, Inputs::PAD_DOWN,
+		Inputs::PAD_TRIANGLE, Inputs::PAD_CIRCLE, Inputs::PAD_CROSS, Inputs::PAD_SQUARE, Inputs::PAD_L1, Inputs::PAD_R1,
+		Inputs::PAD_L2, Inputs::PAD_R2};
+	for (size_t i = 0; i < std::size(pressure_inputs); i++)
+		in.pressures[i] = rawInputs[pressure_inputs[i]];
+	return in;
+}
+
+void PadDualshock2::SetInjectedInput(const Pad::FrameInput* input)
+{
+	if (input)
+		injectedInput = *input;
+	else
+		injectedInput.reset();
+}
+
+const Pad::FrameInput* PadDualshock2::GetInjectedInput() const
+{
+	return injectedInput ? &*injectedInput : nullptr;
 }
 
 bool PadDualshock2::IsAnalogLightEnabled() const

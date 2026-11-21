@@ -37,11 +37,10 @@ namespace RollbackTest
 	void RequestBattery(u32 frames);
 
 	/// Called from VMManager::Internal::PollInputOnCPUThread after the pads have been polled.
-	/// Records or overrides the pad input and requests a CPU loop exit.
+	/// Records or injects the pad input (Rollback input injection) and requests a CPU loop exit.
 	void OnInputPolled();
 
-	/// Called from VMManager::Execute before the CPU loop is entered. Re-applies the pad state of
-	/// the current frame, because host input events may have changed it since the poll.
+	/// Called from VMManager::Execute before the CPU loop is entered (diagnostic timer trace).
 	void OnBeforeExecute();
 
 	/// Called from VMManager::Execute after the CPU loop has exited. Snapshots and restores happen

@@ -5,6 +5,7 @@
 
 #include "Config.h"
 
+#include <array>
 #include <optional>
 #include <span>
 
@@ -107,4 +108,20 @@ namespace Pad
 
 	// Number of macro buttons per controller.
 	static constexpr u32 NUM_MACRO_BUTTONS_PER_CONTROLLER = 16;
+
+	// Rollback fork: one frame of controller input as the game sees it (the DualShock 2 poll data).
+	// Compact and plain, so netplay can send it as is.
+	struct FrameInput
+	{
+		u16 buttons = 0xffff; // active low, poll bytes 3 (bits 8-15) and 4 (bits 0-7)
+		u8 rx = ANALOG_NEUTRAL_POSITION; // poll bytes 5-8
+		u8 ry = ANALOG_NEUTRAL_POSITION;
+		u8 lx = ANALOG_NEUTRAL_POSITION;
+		u8 ly = ANALOG_NEUTRAL_POSITION;
+		// Poll bytes 9-20: right, left, up, down, triangle, circle, cross, square, L1, R1, L2, R2.
+		std::array<u8, 12> pressures = {};
+
+		bool operator==(const FrameInput&) const = default;
+	};
+	static_assert(sizeof(FrameInput) == 18);
 } // namespace Pad

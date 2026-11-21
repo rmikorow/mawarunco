@@ -63,6 +63,8 @@ private:
 
 	u32 buttons = 0xffffffffu;
 	Analogs analogs;
+	// Rollback fork: see PadBase::SetInjectedInput().
+	std::optional<Pad::FrameInput> injectedInput;
 	// Analog button can be held without changing its state.
 	// We track here if it is currently held down, to avoid flipping in
 	// and out of analog mode every frame.
@@ -108,6 +110,7 @@ private:
 
 	void ConfigLog();
 
+	u8 GetPollPressure(u32 index) const;
 	u8 Mystery(u8 commandByte);
 	u8 ButtonQuery(u8 commandByte);
 	u8 Poll(u8 commandByte);
@@ -159,6 +162,11 @@ public:
 	bool Freeze(StateWrapper& sw) override;
 
 	u8 SendCommandByte(u8 commandByte) override;
+
+	bool SupportsInputInjection() const override { return true; }
+	Pad::FrameInput CaptureLiveInput() const override;
+	void SetInjectedInput(const Pad::FrameInput* input) override;
+	const Pad::FrameInput* GetInjectedInput() const override;
 
 	static const Pad::ControllerInfo ControllerInfo;
 };

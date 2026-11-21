@@ -10,7 +10,6 @@
 #include "MemoryTypes.h"
 #include "R3000A.h"
 #include "R5900.h"
-#include "Recording/PadData.h"
 #include "SIO/Pad/Pad.h"
 #include "SIO/Pad/PadBase.h"
 #include "SIO/Sio.h"
@@ -51,7 +50,7 @@ namespace RollbackTest
 	static u32 s_frame = 0;
 	static std::unique_ptr<Rollback::Snapshot> s_start_state;
 	static std::unique_ptr<Rollback::Snapshot> s_end_state;
-	static std::vector<PadData> s_inputs; // (s_num_frames + 1) * NUM_PORTS entries
+	static std::vector<Rollback::PadInput> s_inputs; // (s_num_frames + 1) * NUM_PORTS entries
 
 	static double s_save_ms = 0.0;
 	static double s_load_ms = 0.0;
@@ -104,7 +103,6 @@ namespace RollbackTest
 
 	static u32 s_test_index = 0;
 	static bool s_exit_pending = false;
-	static u32 s_input_changed_frames = 0; // frames where host input changed the pad after the poll
 	static Variant s_variant = VARIANT_NONE; // diagnostic, see RollbackTest.h
 
 	// Component mask bits for SaveState_LoadFromMemory (SavestateEntries order, bit 0 = internals).
@@ -199,7 +197,6 @@ namespace RollbackTest
 
 	static void Finish();
 
-	static u64 PadSignature();
 	static void ApplyFrameInput(u32 frame);
 	static void DumpEntry(const char* tag, const std::string& name, const u8* data, u32 size);
 	static std::unique_ptr<Rollback::Snapshot> TakeSnapshot(double* ms);
@@ -320,6 +317,7 @@ void RollbackTest::Abort()
 
 void RollbackTest::Finish()
 {
+	Rollback::EndInputInjection();
 	s_phase = Phase::Idle;
 	s_requested_frames = 0;
 	s_exit_pending = false;
@@ -636,6 +634,25 @@ void RollbackTest::OnInputPolled()
 				"Rollback test: MTVU is enabled, results are not meaningful.", Host::OSD_WARNING_DURATION);
 		}
 
+		// The game sees only the recorded/replayed input from now on, host input cannot change it mid-frame.
+		Error error;
+		if (!Rollback::BeginInputInjection(&error))
+		{
+			s_requested_frames = 0;
+			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_TRIANGLE_EXCLAMATION,
+				fmt::format("Rollback test: {}", error.GetDescription()), Host::OSD_ERROR_DURATION);
+			// An unattended series cannot recover from this, stop it instead of retrying forever.
+			if (s_auto_active)
+			{
+				s_auto_active = false;
+				s_battery_active = false;
+				Console.Error(fmt::format("AUTOTEST SUMMARY: aborted, {}", error.GetDescription()));
+				if (s_auto_exit)
+					Host::RequestVMShutdown(false, false, false);
+			}
+			return;
+		}
+
 		s_num_frames = s_requested_frames;
 		s_requested_frames = 0;
 		s_frame = 0;
@@ -656,7 +673,6 @@ void RollbackTest::OnInputPolled()
 		s_resim_suppress_output = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "ResimSuppressOutput", true);
 		s_resim_stats = {};
 		s_trace_mismatches = 0;
-		s_input_changed_frames = 0;
 		s_timer_rec.clear();
 		s_timer_replay.clear();
 		s_timer_compared = false;
@@ -668,10 +684,15 @@ void RollbackTest::OnInputPolled()
 	// OnExecutionExited(), after the event test has completed.
 	if (s_phase == Phase::Recording && !s_resim_active)
 	{
-		// Input for the frame that starts now. Frame s_num_frames is recorded too, because the
-		// pad state at the end point is part of the end snapshot.
+		// Input for the frame that starts now: what the host controllers press, injected so that the
+		// game sees exactly this for the whole frame. Frame s_num_frames is recorded too, because the
+		// input at the end point is part of the end snapshot.
 		for (u32 port = 0; port < NUM_PORTS; port++)
-			s_inputs.emplace_back(static_cast<int>(port), 0);
+		{
+			const Rollback::PadInput input = Rollback::CaptureLocalInput(port);
+			s_inputs.push_back(input);
+			Rollback::SetInput(port, input);
+		}
 	}
 	else
 	{
@@ -685,46 +706,15 @@ void RollbackTest::OnInputPolled()
 }
 
 // Compact fingerprint of what the game can read from both pads (buttons, sticks, pressures).
-u64 RollbackTest::PadSignature()
-{
-	u64 h = 0xcbf29ce484222325ull;
-	auto mix = [&h](u64 v) { h = (h ^ v) * 0x100000001b3ull; };
-	for (u32 port = 0; port < NUM_PORTS; port++)
-	{
-		const PadBase* pad = Pad::GetPad(sioConvertPortAndSlotToPad(static_cast<int>(port), 0));
-		if (!pad)
-			continue;
-		mix(pad->GetButtons());
-		const auto [lx, ly] = pad->GetRawLeftAnalog();
-		const auto [rx, ry] = pad->GetRawRightAnalog();
-		mix((static_cast<u64>(lx) << 24) | (static_cast<u64>(ly) << 16) | (static_cast<u64>(rx) << 8) | ry);
-		for (u32 i = 0; i < 16; i++)
-			mix(pad->GetRawInput(i));
-	}
-	return h;
-}
-
-// Sets the recorded pad state of the given frame.
 void RollbackTest::ApplyFrameInput(u32 frame)
 {
 	for (u32 port = 0; port < NUM_PORTS; port++)
-		s_inputs[frame * NUM_PORTS + port].OverrideActualController();
+		Rollback::SetInput(port, s_inputs[frame * NUM_PORTS + port]);
 }
 
 void RollbackTest::OnBeforeExecute()
 {
 	UpdateTimerTrace();
-
-	// OnExecutionExited() has already advanced s_frame, so the frame being emulated is s_frame - 1.
-	if (s_phase == Phase::Idle || s_frame == 0 || s_inputs.size() < s_frame * NUM_PORTS)
-		return;
-
-	// Host input events are processed between Cpu->Execute() calls (Qt event loop). They must not
-	// change the pad after the input poll, or the game reads something other than what was recorded.
-	const u64 before = PadSignature();
-	ApplyFrameInput(s_frame - 1);
-	if (s_phase == Phase::Recording && PadSignature() != before)
-		s_input_changed_frames++;
 }
 
 void RollbackTest::OnExecutionExited()
@@ -838,8 +828,8 @@ void RollbackTest::OnExecutionExited()
 	std::unique_ptr<Rollback::Snapshot> replay_state = TakeSnapshot(&replay_ms);
 	if (replay_state)
 	{
-		Console.WriteLn(fmt::format("Rollback test: {} of {} frames diverged during replay, host input changed the pad after the poll in {} frames",
-			s_trace_mismatches, s_num_frames + 1, s_input_changed_frames));
+		Console.WriteLn(fmt::format("Rollback test: {} of {} frames diverged during replay", s_trace_mismatches,
+			s_num_frames + 1));
 		LogSnapshotStats();
 		LogResimStats();
 		bool same = CompareSnapshots(s_end_state->state, replay_state->state);
