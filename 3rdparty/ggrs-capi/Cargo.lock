@@ -100,6 +100,7 @@ dependencies = [
 name = "ggrs-capi"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "ggrs",
  "serde",
 ]

@@ -7,14 +7,16 @@
 //! All functions must be called from one thread. Errors are reported through return values plus
 //! `ggrs_last_error()`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::ffi::{CStr, c_char};
-use std::net::SocketAddr;
+use std::io::ErrorKind;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::rc::Rc;
 
 use ggrs::{
-    Config, DesyncDetection, GgrsError, GgrsEvent, GgrsRequest, InputStatus, P2PSession, PlayerType,
-    PredictRepeatLast, SessionBuilder, SessionState, SyncTestSession, UdpNonBlockingSocket,
+    Config, DesyncDetection, GgrsError, GgrsEvent, GgrsRequest, InputStatus, Message, NonBlockingSocket, P2PSession,
+    PlayerType, PredictRepeatLast, SessionBuilder, SessionState, SyncTestSession,
 };
 use serde::{Deserialize, Serialize};
 
@@ -45,6 +47,60 @@ impl Config for Cfg {
     type Address = SocketAddr;
 }
 
+/// UDP socket for one remote peer.
+///
+/// Join side: the peer address is given. Host side ("any"): the address is learned from the first valid
+/// GGRS packet, so the joining player does not need port forwarding (their router may rewrite the
+/// source port). After that, packets from other addresses are ignored. GGRS itself always sees the
+/// peer under one fixed placeholder address.
+type SharedAddr = Rc<Cell<Option<SocketAddr>>>;
+
+struct PeerSocket {
+    socket: UdpSocket,
+    buffer: Box<[u8; 4096]>,
+    placeholder: SocketAddr,
+    /// Actual peer address; shared with the session so the caller can query it.
+    peer: SharedAddr,
+}
+
+impl PeerSocket {
+    fn bind(port: u16, placeholder: SocketAddr, peer: SharedAddr) -> std::io::Result<Self> {
+        let socket = UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))?;
+        socket.set_nonblocking(true)?;
+        Ok(Self { socket, buffer: Box::new([0; 4096]), placeholder, peer })
+    }
+}
+
+impl NonBlockingSocket<SocketAddr> for PeerSocket {
+    fn send_to(&mut self, msg: &Message, addr: &SocketAddr) {
+        let (Some(peer), true) = (self.peer.get(), *addr == self.placeholder) else { return };
+        if let Ok(buf) = bincode::serialize(msg) {
+            let _ = self.socket.send_to(&buf, peer);
+        }
+    }
+
+    fn receive_all_messages(&mut self) -> Vec<(SocketAddr, Message)> {
+        let mut received = Vec::new();
+        loop {
+            match self.socket.recv_from(&mut self.buffer[..]) {
+                Ok((n, src)) => {
+                    let Ok(msg) = bincode::deserialize::<Message>(&self.buffer[..n]) else { continue };
+                    if self.peer.get().is_none() {
+                        self.peer.set(Some(src));
+                    }
+                    if self.peer.get() == Some(src) {
+                        received.push((self.placeholder, msg));
+                    }
+                }
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => return received,
+                // Windows reports ICMP "port unreachable" from earlier sends this way; not fatal.
+                Err(ref e) if e.kind() == ErrorKind::ConnectionReset => {}
+                Err(_) => return received,
+            }
+        }
+    }
+}
+
 enum Session {
     P2P(P2PSession<Cfg>),
     SyncTest(SyncTestSession<Cfg>),
@@ -53,6 +109,8 @@ enum Session {
 /// Opaque session handle for C.
 pub struct GgrsSession {
     session: Session,
+    /// Remote peer address (learned on the host side), shared with the socket.
+    peer_addr: Option<SharedAddr>,
     num_players: usize,
     requests: Vec<GgrsRequest<Cfg>>,
     events: VecDeque<GgrsEvent<Cfg>>,
@@ -79,7 +137,8 @@ pub struct GgrsP2PConfig {
     pub local_player: u32,
     /// Local UDP port to bind.
     pub local_port: u16,
-    /// Remote address as "ip:port" (NUL terminated).
+    /// Remote address as "ip:port", or "any" on the host side: the peer address is then learned from
+    /// its first packet, so the joining side needs no port forwarding (NUL terminated).
     pub remote_addr: *const c_char,
     /// Input delay in frames.
     pub input_delay: u32,
@@ -171,7 +230,13 @@ fn error_code(e: GgrsError) -> i32 {
 }
 
 fn new_session(session: Session, num_players: usize) -> *mut GgrsSession {
-    Box::into_raw(Box::new(GgrsSession { session, num_players, requests: Vec::new(), events: VecDeque::new() }))
+    Box::into_raw(Box::new(GgrsSession {
+        session,
+        peer_addr: None,
+        num_players,
+        requests: Vec::new(),
+        events: VecDeque::new(),
+    }))
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -216,13 +281,21 @@ pub extern "C" fn ggrs_p2p_start(cfg: *const GgrsP2PConfig) -> *mut GgrsSession 
     }
     // SAFETY: NUL terminated string from the caller.
     let addr_str = unsafe { CStr::from_ptr(cfg.remote_addr) }.to_string_lossy();
-    let remote: SocketAddr = match addr_str.parse() {
-        Ok(a) => a,
-        Err(e) => {
-            set_error(format!("invalid remote address '{addr_str}': {e}"));
-            return std::ptr::null_mut();
+    // "any": host side, the peer address is learned from its first packet.
+    let peer: Option<SocketAddr> = if addr_str.trim().eq_ignore_ascii_case("any") {
+        None
+    } else {
+        match addr_str.trim().parse() {
+            Ok(a) => Some(a),
+            Err(e) => {
+                set_error(format!("invalid remote address '{addr_str}': {e}"));
+                return std::ptr::null_mut();
+            }
         }
     };
+    // GGRS identifies the peer by this address; the socket maps it to the actual one.
+    let remote = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 1)), 1);
+    let peer_addr: SharedAddr = Rc::new(Cell::new(peer));
 
     let num_players = cfg.num_players as usize;
     let build = || -> Result<P2PSession<Cfg>, String> {
@@ -245,13 +318,18 @@ pub extern "C" fn ggrs_p2p_start(cfg: *const GgrsP2PConfig) -> *mut GgrsSession 
                 if player == cfg.local_player as usize { PlayerType::Local } else { PlayerType::Remote(remote) };
             builder = builder.add_player(kind, player).map_err(|e| e.to_string())?;
         }
-        let socket = UdpNonBlockingSocket::bind_to_port(cfg.local_port)
+        let socket = PeerSocket::bind(cfg.local_port, remote, peer_addr.clone())
             .map_err(|e| format!("cannot bind UDP port {}: {e}", cfg.local_port))?;
         builder.start_p2p_session(socket).map_err(|e| e.to_string())
     };
 
     match build() {
-        Ok(session) => new_session(Session::P2P(session), num_players),
+        Ok(session) => {
+            let s = new_session(Session::P2P(session), num_players);
+            // SAFETY: freshly allocated session.
+            unsafe { (*s).peer_addr = Some(peer_addr) };
+            s
+        }
         Err(e) => {
             set_error(e);
             std::ptr::null_mut()
@@ -552,4 +630,22 @@ pub extern "C" fn ggrs_network_stats(s: *mut GgrsSession, player: u32, out: *mut
         }
         Err(e) => error_code(e),
     }
+}
+
+/// Remote peer address as "ip:port" (NUL terminated, truncated), learned on the host side. Returns the
+/// full length, 0 while unknown or for sync tests.
+#[unsafe(no_mangle)]
+pub extern "C" fn ggrs_peer_address(s: *mut GgrsSession, buf: *mut c_char, buf_len: usize) -> usize {
+    let Some(h) = handle(s) else { return 0 };
+    let Some(addr) = h.peer_addr.as_ref().and_then(|a| a.get()) else { return 0 };
+    let text = addr.to_string();
+    if !buf.is_null() && buf_len > 0 {
+        let n = text.len().min(buf_len - 1);
+        // SAFETY: the caller provides a buffer of buf_len bytes.
+        unsafe {
+            std::ptr::copy_nonoverlapping(text.as_ptr(), buf as *mut u8, n);
+            *buf.add(n) = 0;
+        }
+    }
+    text.len()
 }

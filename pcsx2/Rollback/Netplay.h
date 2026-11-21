@@ -20,6 +20,8 @@ class Error;
 namespace Netplay
 {
 	/// Sets the session to start once the VM runs (command line "-netplay <spec>"). Specs:
+	///   "host[=7000][,delay=1][,rollback=2]"         player 1, needs the UDP port forwarded
+	///   "join=203.0.113.5[:7000][,delay=1][,rollback=2]"  player 2, no port forwarding needed
 	///   "port=7000,remote=127.0.0.1:7001,player=0[,delay=1][,rollback=2][,desync=60][,sparse=1][,testinput=1]"
 	///   "synctest[,distance=2][,delay=0]"  (local determinism test, no network)
 	bool SetLaunchOptions(std::string_view spec, Error* error);

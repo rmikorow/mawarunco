@@ -53,6 +53,7 @@ namespace Netplay
 	};
 
 	static constexpr u32 NUM_PLAYERS = Rollback::NUM_PORTS;
+	static constexpr u16 DEFAULT_PORT = 7000;
 	static constexpr u32 LOCAL_CONTROLLER_PORT = 0; // host controller bound to port 1
 	static constexpr const char* OSD_KEY = "Netplay";
 	static constexpr double FRAME_MS = 1000.0 / 59.94;
@@ -124,6 +125,36 @@ bool Netplay::SetLaunchOptions(std::string_view spec, Error* error)
 
 		if (key == "synctest")
 			opts.synctest = true;
+		else if (key == "host")
+		{
+			// Host: player 1, waits on the given port (default 7000) and learns the peer's address from
+			// its first packet. Only the host needs a forwarded UDP port.
+			opts.local_player = 0;
+			opts.remote = "any";
+			opts.local_port = DEFAULT_PORT;
+			have_remote = true;
+			if (!value.empty())
+			{
+				const std::optional<u32> v = number(65535);
+				if (!v)
+					return false;
+				opts.local_port = static_cast<u16>(*v);
+			}
+		}
+		else if (key == "join")
+		{
+			// Join: player 2, connects to the host's "ip[:port]" from any free local port.
+			if (value.empty())
+			{
+				Error::SetString(error, "Netplay: 'join' needs the host address, e.g. join=203.0.113.5:7000");
+				return false;
+			}
+			opts.local_player = 1;
+			opts.local_port = 0;
+			opts.remote = (value.find(':') == std::string_view::npos) ? fmt::format("{}:{}", value, DEFAULT_PORT) :
+																		std::string(value);
+			have_remote = true;
+		}
 		else if (key == "remote")
 		{
 			opts.remote = std::string(value);
@@ -201,7 +232,7 @@ bool Netplay::SetLaunchOptions(std::string_view spec, Error* error)
 
 	if (!opts.synctest && !have_remote)
 	{
-		Error::SetString(error, "Netplay: 'remote=ip:port' is required (or 'synctest').");
+		Error::SetString(error, "Netplay: use 'host', 'join=ip[:port]' or 'synctest'.");
 		return false;
 	}
 
@@ -216,7 +247,9 @@ bool Netplay::IsActive()
 
 bool Netplay::Start(const Options& opts, Error* error)
 {
-	if (!Rollback::BeginInputInjection(error))
+	// A real match needs a DualShock 2 on both ports on both machines; the sync test also runs with an
+	// empty port 2.
+	if (!Rollback::BeginInputInjection(error, !opts.synctest))
 		return false;
 
 	if (opts.synctest)
@@ -271,7 +304,9 @@ bool Netplay::Start(const Options& opts, Error* error)
 			opts.local_player + 1, opts.local_port, opts.remote, opts.input_delay, opts.max_prediction,
 			opts.desync_interval, opts.sparse_saving ? ", sparse saving" : ""));
 		Host::AddIconOSDMessage(OSD_KEY, ICON_FA_NETWORK_WIRED,
-			fmt::format("Netplay: waiting for {} ...", opts.remote), Host::OSD_INFO_DURATION);
+			(opts.remote == "any") ? fmt::format("Netplay: hosting on UDP port {}, waiting for the other player ...", opts.local_port) :
+									 fmt::format("Netplay: connecting to {} ...", opts.remote),
+			Host::OSD_INFO_DURATION);
 	}
 	return true;
 }
@@ -396,8 +431,11 @@ bool Netplay::AdvanceSession()
 		s_was_running = true;
 		if (!s_options.synctest)
 		{
-			Console.WriteLn("Netplay: connected, running");
-			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_NETWORK_WIRED, "Netplay: connected.", Host::OSD_INFO_DURATION);
+			char peer[64] = {};
+			ggrs_peer_address(s_session, peer, sizeof(peer));
+			Console.WriteLn(fmt::format("Netplay: connected to {}, running", peer));
+			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_NETWORK_WIRED, fmt::format("Netplay: connected to {}.", peer),
+				Host::OSD_INFO_DURATION);
 		}
 	}
 

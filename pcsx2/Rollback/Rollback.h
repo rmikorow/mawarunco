@@ -40,6 +40,10 @@ namespace Rollback
 		bool inputs_injected = false;
 		std::array<PadInput, NUM_PORTS> inputs = {};
 
+		// Remaining "unplugged" polls of each controller after it was (re)created, for example when a
+		// savestate with another controller type was loaded. Not part of the savestate either.
+		std::array<size_t, NUM_PORTS> pad_eject_ticks = {};
+
 		/// Releases the buffers (a later Save() allocates them again).
 		void Release();
 	};
@@ -61,9 +65,10 @@ namespace Rollback
 	const char* FirstExtrasDifference(const Snapshot& a, const Snapshot& b);
 
 	/// Starts input injection: from now on the game only sees the inputs given to SetInput(), host input
-	/// does not reach it any more. Both ports start with "nothing pressed". Empty ports stay empty. Fails
-	/// if a port has a controller type that does not support injection (only the DualShock 2 does).
-	bool BeginInputInjection(Error* error);
+	/// does not reach it any more. Both ports start with "nothing pressed". Empty ports stay empty unless
+	/// require_all_ports is set. Fails if a port has a controller type that does not support injection
+	/// (only the DualShock 2 does).
+	bool BeginInputInjection(Error* error, bool require_all_ports = false);
 
 	/// Ends input injection, the game sees host input again.
 	void EndInputInjection();

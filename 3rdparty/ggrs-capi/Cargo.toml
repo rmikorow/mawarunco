@@ -12,6 +12,8 @@ crate-type = ["staticlib"]
 [dependencies]
 ggrs = "0.13.0"
 serde = { version = "1", features = ["derive"] }
+# Same encoding as GGRS' own UDP socket.
+bincode = "1.3"
 
 # A panic must never unwind into C++.
 [profile.dev]

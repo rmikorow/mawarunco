@@ -42,7 +42,7 @@ typedef struct GgrsP2PConfig
 	uint32_t num_players;     ///< 2 for this game
 	uint32_t local_player;    ///< handle of the local player, every other handle is remote
 	uint16_t local_port;      ///< local UDP port
-	const char* remote_addr;  ///< "ip:port"
+	const char* remote_addr;  ///< "ip:port", or "any" on the host side (peer address learned from its first packet)
 	uint32_t input_delay;     ///< frames
 	uint32_t max_prediction;  ///< rollback depth in frames
 	uint32_t desync_interval; ///< frames between checksum exchanges, 0 = off
@@ -91,6 +91,8 @@ int32_t ggrs_frames_ahead(GgrsSession* s);
 int32_t ggrs_current_frame(GgrsSession* s);
 int32_t ggrs_confirmed_frame(GgrsSession* s);
 int32_t ggrs_network_stats(GgrsSession* s, uint32_t player, GgrsNetworkStatsC* out);
+/// Remote peer address "ip:port" (learned on the host side). Returns the length, 0 while unknown.
+size_t ggrs_peer_address(GgrsSession* s, char* buf, size_t buf_len);
 
 #ifdef __cplusplus
 }
