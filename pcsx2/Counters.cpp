@@ -1050,7 +1050,9 @@ bool SaveStateBase::rcntFreeze()
 	Freeze(gsVideoMode);
 	Freeze(gsIsInterlaced);
 
-	if (IsLoading())
+	// Rollback fork: nextDeltaCounter/nextStartCounter and cpuRegs.nextEventCycle are part of the state;
+	// recompute only for regular loads (see g_SaveStateExactRestore).
+	if (IsLoading() && !g_SaveStateExactRestore)
 		cpuRcntSet();
 
 	return IsOkay();

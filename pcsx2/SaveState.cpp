@@ -52,6 +52,7 @@ static tlbs s_tlb_backup[std::size(tlb)];
 // Rollback fork: set while SaveState_LoadFromMemory restores without clearing the recompiler
 // caches. EE/IOP RAM are then restored page by page, and only code in changed pages is dropped.
 static bool s_incremental_ram_restore = false;
+bool g_SaveStateExactRestore = false;
 static constexpr u32 RESTORE_PAGE_SIZE = 0x1000;
 static bool s_restore_clear_iop_code = true;
 static bool s_restore_clear_ee_code = true;
@@ -1387,7 +1388,11 @@ bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error, bool c
 		// (which would clear the code). Self-modifying code is not detected until pages are re-protected.
 		mmap_ResetBlockTracking();
 	}
-	ScopedGuard incremental_guard([]() { s_incremental_ram_restore = false; });
+	g_SaveStateExactRestore = true;
+	ScopedGuard incremental_guard([]() {
+		s_incremental_ram_restore = false;
+		g_SaveStateExactRestore = false;
+	});
 
 	// The internal structures start at offset 0 of the buffer (see SaveState_DownloadState).
 	memLoadingState state(list.GetBuffer());

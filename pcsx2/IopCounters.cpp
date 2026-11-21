@@ -811,7 +811,9 @@ bool SaveStateBase::psxRcntFreeze()
 	if (!IsOkay())
 		return false;
 
-	if (IsLoading())
+	// Rollback fork: psxRcntUpdate() is a full counter event (overflow/target interrupts, SPU2/DEV9/USB
+	// catch-up). The scheduling it computes is part of the state, so exact restores skip it.
+	if (IsLoading() && !g_SaveStateExactRestore)
 		psxRcntUpdate();
 
 	return true;
