@@ -4,7 +4,7 @@
 #include "GS.h"
 #include "Gif_Unit.h"
 #include "MTGS.h"
-#include "Rollback/RollbackTest.h"
+#include "Rollback/Rollback.h"
 #include "MTVU.h"
 #include "Host.h"
 #include "IconsFontAwesome.h"
@@ -255,7 +255,7 @@ void MTGS::PostVsyncStart(bool registers_written)
 	remainder[4] = static_cast<u32>(registers_written);
 	// Rollback fork: resimulated frames are emulated by the GS but not presented. The flag travels with
 	// the packet because the GS thread runs behind the CPU thread.
-	remainder[5] = static_cast<u32>(RollbackTest::g_resimulating);
+	remainder[5] = static_cast<u32>(Rollback::g_resimulating);
 	s_packet_writepos = (s_packet_writepos + 2) & RingBufferMask;
 
 	SendDataPacket();

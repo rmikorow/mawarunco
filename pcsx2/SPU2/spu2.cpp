@@ -10,7 +10,7 @@
 #include "GS/GSCapture.h"
 #include "MTGS.h"
 #include "R3000A.h"
-#include "Rollback/RollbackTest.h"
+#include "Rollback/Rollback.h"
 #include "VMManager.h"
 
 #include "common/Error.h"
@@ -516,7 +516,7 @@ static void DCFilter(float *input)
 __forceinline void spu2Output(StereoOut32 out)
 {
 	// Rollback fork: the audio of resimulated frames has already been played (as predicted), drop it.
-	if (RollbackTest::g_resimulating)
+	if (Rollback::g_resimulating)
 		return;
 
 	float conv[2];

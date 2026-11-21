@@ -31,6 +31,7 @@
 #include "R5900.h"
 #include "Recording/InputRecording.h"
 #include "Recording/InputRecordingControls.h"
+#include "Rollback/Rollback.h"
 #include "Rollback/RollbackTest.h"
 #include "SIO/Memcard/MemoryCardFile.h"
 #include "SIO/Pad/Pad.h"
@@ -2277,7 +2278,7 @@ void VMManager::ResetFrameLimiter()
 
 void VMManager::Internal::Throttle()
 {
-	if (s_target_speed == 0.0f || s_use_vsync_for_timing || RollbackTest::g_resimulating)
+	if (s_target_speed == 0.0f || s_use_vsync_for_timing || Rollback::g_resimulating)
 		return;
 
 	const u64 uExpectedEnd =
@@ -2914,7 +2915,9 @@ void VMManager::Internal::EntryPointCompilingOnCPUThread()
 
 void VMManager::Internal::VSyncOnCPUThread()
 {
-	// Rollback fork: periodic recompiler statistics (performance diagnostics).
+	// Rollback fork: periodic recompiler statistics (performance diagnostics), [EmuCore/Rollback] RecStatsLog.
+	static const bool s_stats_log = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "RecStatsLog", false);
+	if (s_stats_log)
 	{
 		static u32 s_stats_frames = 0;
 		static Common::Timer s_stats_timer;
