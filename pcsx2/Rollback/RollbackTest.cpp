@@ -106,6 +106,20 @@ namespace RollbackTest
 		{"caches + all but SPU2", true, true, M_ALL & ~M_SPU2},
 		{"all, keep caches", true, false, M_ALL},
 	};
+	// Automatic test series: [EmuCore/Rollback] AutoTestRuns (0 = off), AutoTestExit (shut down
+	// the VM afterwards, combine with -batch to exit PCSX2). Runs without user input, e.g. from a
+	// savestate in a CPU vs CPU fight, and logs a summary line.
+	static bool s_auto_init = false;
+	static bool s_auto_exit = false;
+	static u32 s_auto_runs_left = 0;
+	static u32 s_auto_wait = 0;
+	static u32 s_auto_identical = 0;
+	static u32 s_auto_mismatch = 0;
+	static bool s_auto_active = false;
+	static bool s_last_same = false;
+	static void AutoTestTick();
+	static void AutoTestResult(bool same);
+
 	static u32 s_battery_next = 0;
 	static u32 s_battery_frames = 0;
 	static bool s_battery_active = false;
@@ -298,10 +312,56 @@ std::unique_ptr<ArchiveEntryList> RollbackTest::TakeSnapshot(double* ms)
 	return state;
 }
 
+void RollbackTest::AutoTestTick()
+{
+	if (!s_auto_init)
+	{
+		s_auto_init = true;
+		const int runs = Host::GetBaseIntSettingValue("EmuCore/Rollback", "AutoTestRuns", 0);
+		s_auto_exit = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "AutoTestExit", false);
+		if (runs > 0)
+		{
+			s_auto_runs_left = static_cast<u32>(runs);
+			s_auto_active = true;
+			s_auto_wait = 180; // let the state settle after boot/load
+			Console.WriteLn(fmt::format("AUTOTEST: {} runs", runs));
+		}
+	}
+
+	if (!s_auto_active || s_battery_active || s_requested_frames != 0 || s_auto_runs_left == 0)
+		return;
+
+	if (s_auto_wait > 0)
+	{
+		s_auto_wait--;
+		return;
+	}
+
+	s_auto_runs_left--;
+	s_auto_wait = 30;
+	Request(120, VARIANT_NONE);
+}
+
+void RollbackTest::AutoTestResult(bool same)
+{
+	if (!s_auto_active)
+		return;
+
+	(same ? s_auto_identical : s_auto_mismatch)++;
+	if (s_auto_runs_left != 0)
+		return;
+
+	s_auto_active = false;
+	Console.WriteLn(fmt::format("AUTOTEST SUMMARY: {} identical, {} mismatch", s_auto_identical, s_auto_mismatch));
+	if (s_auto_exit)
+		Host::RequestVMShutdown(false, false, false);
+}
+
 void RollbackTest::OnInputPolled()
 {
 	if (s_phase == Phase::Idle)
 	{
+		AutoTestTick();
 		if (s_requested_frames == 0)
 			return;
 
@@ -497,13 +557,20 @@ void RollbackTest::OnExecutionExited()
 			s_variant.restore ? fmt::format(" [record pass: {}]", s_variant.name) : std::string(), s_num_frames,
 			same ? "IDENTICAL" : "MISMATCH", s_save_ms, s_load_ms);
 		Console.WriteLn(same ? Color_Green : Color_Red, msg);
+		s_last_same = same;
 		Host::AddIconOSDMessage(OSD_KEY, same ? ICON_FA_CHECK : ICON_FA_TRIANGLE_EXCLAMATION, msg,
 			Host::OSD_ERROR_DURATION);
 		if (s_battery_active)
 			Console.WriteLn(fmt::format("BATTERY RESULT: {:<28} {}", s_variant.name, same ? "IDENTICAL" : "MISMATCH"));
 	}
 
+	const bool auto_result_pending = s_auto_active && !s_battery_active;
+	const bool auto_same = replay_state && s_last_same;
+
 	Finish();
+
+	if (auto_result_pending)
+		AutoTestResult(auto_same);
 
 	if (s_battery_active)
 	{
