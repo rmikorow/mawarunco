@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <span>
+
 #include "CDVDcommon.h"
 
 #include <memory>
@@ -168,6 +170,8 @@ extern void cdvdReadLanguageParams(u8* config);
 
 extern void cdvdLoadNVRAM();
 extern void cdvdSaveNVRAM();
+// Rollback fork: the console NVRAM (1 KiB), carried by rollback snapshots.
+extern std::span<u8> cdvdGetNVRAM();
 extern void cdvdReset();
 extern void cdvdVsync();
 extern void cdvdActionInterrupt();

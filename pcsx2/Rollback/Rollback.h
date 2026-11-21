@@ -44,6 +44,9 @@ namespace Rollback
 		// savestate with another controller type was loaded. Not part of the savestate either.
 		std::array<size_t, NUM_PORTS> pad_eject_ticks = {};
 
+		// Console NVRAM (not part of the savestate, kept in a file).
+		std::vector<u8> nvram;
+
 		/// Releases the buffers (a later Save() allocates them again).
 		void Release();
 	};

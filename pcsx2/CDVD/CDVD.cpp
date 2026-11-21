@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "Rollback/Netplay.h"
 #include "CDVD/CDVD.h"
 #include "CDVD/Ps1CD.h"
 #include "CDVD/CDVD_internal.h"
@@ -164,6 +165,16 @@ static std::string cdvdGetNVRAMPath()
 
 void cdvdLoadNVRAM()
 {
+	// Rollback fork: netplay peers must see the same NVRAM and mechacon version, but the files differ
+	// between consoles. Use the generated defaults for the BIOS region instead (same BIOS on both sides).
+	if (Netplay::IsActive())
+	{
+		cdvdCreateNewNVM();
+		s_mecha_version = DEFAULT_MECHA_VERSION;
+		INFO_LOG("Netplay: using default NVRAM and mechacon version instead of the files.");
+		return;
+	}
+
 	Error error;
 	const std::string nvmfile = cdvdGetNVRAMPath();
 	auto fp = FileSystem::OpenManagedCFileTryIgnoreCase(nvmfile.c_str(), "rb", &error);
@@ -204,8 +215,17 @@ void cdvdLoadNVRAM()
 	DEV_LOG("Mechacon version: 0x{:08X}", s_mecha_version);
 }
 
+std::span<u8> cdvdGetNVRAM()
+{
+	return s_nvram;
+}
+
 void cdvdSaveNVRAM()
 {
+	// Rollback fork: netplay uses default NVRAM (see cdvdLoadNVRAM), it is not written to the file.
+	if (Netplay::IsActive())
+		return;
+
 	Error error;
 	const std::string nvmfile = cdvdGetNVRAMPath();
 	auto fp = FileSystem::OpenManagedCFileTryIgnoreCase(nvmfile.c_str(), "r+b", &error);

@@ -3,6 +3,7 @@
 
 #include "Rollback/Rollback.h"
 
+#include "CDVD/CDVD.h"
 #include "R3000A.h"
 #include "SIO/Pad/Pad.h"
 #include "SIO/Pad/PadBase.h"
@@ -44,6 +45,8 @@ bool Rollback::Save(Snapshot& snapshot, Error* error)
 		const PadBase* pad = GetPortPad(port);
 		snapshot.pad_eject_ticks[port] = pad ? pad->ejectTicks : 0;
 	}
+	const std::span<u8> nvram = cdvdGetNVRAM();
+	snapshot.nvram.assign(nvram.begin(), nvram.end());
 	snapshot.inputs_injected = s_input_injection;
 	for (u32 port = 0; port < NUM_PORTS; port++)
 		snapshot.inputs[port] = s_input_injection ? GetInput(port) : PadInput{};
@@ -68,6 +71,9 @@ void Rollback::LoadExtras(const Snapshot& snapshot)
 		if (PadBase* pad = GetPortPad(port))
 			pad->ejectTicks = snapshot.pad_eject_ticks[port];
 	}
+	const std::span<u8> nvram = cdvdGetNVRAM();
+	if (snapshot.nvram.size() == nvram.size())
+		std::memcpy(nvram.data(), snapshot.nvram.data(), nvram.size());
 	if (s_input_injection && snapshot.inputs_injected)
 	{
 		for (u32 port = 0; port < NUM_PORTS; port++)
@@ -171,5 +177,7 @@ const char* Rollback::FirstExtrasDifference(const Snapshot& a, const Snapshot& b
 		return "injected input";
 	if (a.pad_eject_ticks != b.pad_eject_ticks)
 		return "pad eject ticks";
+	if (a.nvram != b.nvram)
+		return "NVRAM";
 	return nullptr;
 }
