@@ -82,8 +82,9 @@ $biosHash = (Get-FileHash $ReferenceBios -Algorithm SHA256).Hash
     -replace '__BIOS_SHA256__', $biosHash `
     -replace '__BIOS_NAME__', (Split-Path $ReferenceBios -Leaf) |
     Set-Content (Join-Path $out 'netplay.ps1') -Encoding UTF8
+# Rewritten line by line so the package gets Windows line endings (CRLF) whatever the checkout uses.
 foreach ($f in 'Host.bat', 'Join.bat', 'Einstellungen.bat', 'LIESMICH.txt') {
-    Copy-Item (Join-Path $template $f) -Destination $out
+    Get-Content (Join-Path $template $f) | Set-Content (Join-Path $out $f) -Encoding ascii
 }
 
 # ---- Start state --------------------------------------------------------------------------------------
