@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <deque>
 #include <memory>
 #include <optional>
@@ -53,6 +54,13 @@ class ArchiveEntryList;
 // Wrappers to generate a save state compatible across all frontends.
 // These functions assume that the caller has paused the core thread.
 extern std::unique_ptr<ArchiveEntryList> SaveState_DownloadState(Error* error);
+// Rollback fork: same as SaveState_DownloadState, but reuses the buffer of an existing list.
+extern bool SaveState_DownloadStateInto(ArchiveEntryList& list, Error* error);
+// Rollback fork: duration of each part of the last download in ms (index 0 = internal structures,
+// index i + 1 = savestate entry i).
+static constexpr size_t SaveState_NumTimedParts = 15;
+extern std::array<double, SaveState_NumTimedParts> g_SaveStateDownloadTimings;
+extern const char* SaveState_GetTimedPartName(size_t index);
 extern std::unique_ptr<SaveStateScreenshotData> SaveState_SaveScreenshot();
 extern bool SaveState_ZipToDisk(
 	std::unique_ptr<ArchiveEntryList> srclist, std::unique_ptr<SaveStateScreenshotData> screenshot,
@@ -329,6 +337,12 @@ public:
 	size_t GetLength() const
 	{
 		return m_list.size();
+	}
+
+	// Rollback fork: drops the entries but keeps the buffer allocated for reuse.
+	void Clear()
+	{
+		m_list.clear();
 	}
 
 	ArchiveEntry& operator[](uint idx)

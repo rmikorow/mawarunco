@@ -25,6 +25,7 @@
 
 #include "fmt/format.h"
 
+#include <array>
 #include <cstring>
 #include <memory>
 #include <utility>
@@ -80,6 +81,24 @@ namespace RollbackTest
 
 	static double s_save_ms = 0.0;
 	static double s_load_ms = 0.0;
+
+	// Per-frame snapshots during the recording pass, as a netplay session takes them: a ring of reused
+	// buffers. Measures the snapshot cost and, because the replay pass takes none, also checks that
+	// taking a snapshot has no side effect on emulation.
+	static constexpr u32 RING_SIZE = 8;
+	static std::array<ArchiveEntryList, RING_SIZE> s_ring;
+	static bool s_ring_enabled = true;
+	struct SnapshotStats
+	{
+		u32 count = 0;
+		double total_ms = 0.0;
+		double max_ms = 0.0;
+		std::array<double, SaveState_NumTimedParts> part_total_ms = {};
+		std::array<double, SaveState_NumTimedParts> part_max_ms = {};
+	};
+	static SnapshotStats s_snap_stats;
+	static void TakeRingSnapshot();
+	static void LogSnapshotStats();
 
 	static u32 s_test_index = 0;
 	static bool s_exit_pending = false;
@@ -266,6 +285,11 @@ void RollbackTest::Finish()
 	s_inputs.clear();
 	s_inputs.shrink_to_fit();
 	s_trace.clear();
+	for (ArchiveEntryList& slot : s_ring)
+	{
+		slot.Clear();
+		ArchiveEntryList::VmStateBuffer().swap(slot.GetBuffer()); // release the 64 MiB buffers between tests
+	}
 	s_trace.shrink_to_fit();
 	for (u32 i = 0; i <= RAM_COPY_FRAMES; i++)
 	{
@@ -378,6 +402,50 @@ std::unique_ptr<ArchiveEntryList> RollbackTest::TakeSnapshot(double* ms)
 	return state;
 }
 
+void RollbackTest::TakeRingSnapshot()
+{
+	Common::Timer timer;
+	Error error;
+	ArchiveEntryList& slot = s_ring[s_frame % RING_SIZE];
+	if (!SaveState_DownloadStateInto(slot, &error))
+	{
+		Console.Error(fmt::format("Rollback test: ring snapshot failed: {}", error.GetDescription()));
+		return;
+	}
+	const double ms = timer.GetTimeMilliseconds();
+
+	// The first round fills the ring (buffer allocation), only reused buffers are measured.
+	if (s_frame <= RING_SIZE)
+		return;
+
+	SnapshotStats& st = s_snap_stats;
+	st.count++;
+	st.total_ms += ms;
+	st.max_ms = std::max(st.max_ms, ms);
+	for (size_t i = 0; i < SaveState_NumTimedParts; i++)
+	{
+		st.part_total_ms[i] += g_SaveStateDownloadTimings[i];
+		st.part_max_ms[i] = std::max(st.part_max_ms[i], g_SaveStateDownloadTimings[i]);
+	}
+}
+
+void RollbackTest::LogSnapshotStats()
+{
+	const SnapshotStats& st = s_snap_stats;
+	if (st.count == 0)
+		return;
+
+	Console.WriteLn(fmt::format("SNAPSHOT STATS: {} snapshots, avg {:.2f} ms, max {:.2f} ms", st.count,
+		st.total_ms / st.count, st.max_ms));
+	for (size_t i = 0; i < SaveState_NumTimedParts; i++)
+	{
+		const double avg = st.part_total_ms[i] / st.count;
+		if (avg >= 0.01 || st.part_max_ms[i] >= 0.05)
+			Console.WriteLn(fmt::format("  {:<32} avg {:.3f} ms, max {:.3f} ms", SaveState_GetTimedPartName(i), avg,
+				st.part_max_ms[i]));
+	}
+}
+
 void RollbackTest::AutoTestTick()
 {
 	if (!s_auto_init)
@@ -445,6 +513,8 @@ void RollbackTest::OnInputPolled()
 		s_inputs.reserve((s_num_frames + 1) * NUM_PORTS);
 		s_trace.clear();
 		s_trace.reserve(s_num_frames + 1);
+		s_snap_stats = {};
+		s_ring_enabled = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "SnapshotEveryFrame", true);
 		s_trace_mismatches = 0;
 		s_input_changed_frames = 0;
 		s_timer_rec.clear();
@@ -559,6 +629,8 @@ void RollbackTest::OnExecutionExited()
 
 		s_trace.push_back(TakeTrace());
 		CopyRam(s_frame);
+		if (s_frame > 0 && s_ring_enabled)
+			TakeRingSnapshot();
 
 		if (s_frame < s_num_frames)
 		{
@@ -612,6 +684,7 @@ void RollbackTest::OnExecutionExited()
 	{
 		Console.WriteLn(fmt::format("Rollback test: {} of {} frames diverged during replay, host input changed the pad after the poll in {} frames",
 			s_trace_mismatches, s_num_frames + 1, s_input_changed_frames));
+		LogSnapshotStats();
 		bool same = CompareSnapshots(*s_end_state, *replay_state);
 		const Extras replay_extras = CaptureExtras();
 		if (replay_extras.ee_cycle_frac != s_end_extras.ee_cycle_frac)

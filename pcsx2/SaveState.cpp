@@ -36,6 +36,7 @@
 #include "common/Path.h"
 #include "common/ScopedGuard.h"
 #include "common/StringUtil.h"
+#include "common/Timer.h"
 #include "common/ZipHelpers.h"
 
 #include "IconsFontAwesome.h"
@@ -833,19 +834,27 @@ static const std::unique_ptr<BaseSavestateEntry> SavestateEntries[] = {
 	std::unique_ptr<BaseSavestateEntry>(new SaveStateEntry_Achievements),
 };
 
-std::unique_ptr<ArchiveEntryList> SaveState_DownloadState(Error* error)
-{
-	std::unique_ptr<ArchiveEntryList> destlist = std::make_unique<ArchiveEntryList>();
-	destlist->GetBuffer().resize(1024 * 1024 * 64);
+static_assert(std::size(SavestateEntries) + 1 == SaveState_NumTimedParts);
+std::array<double, SaveState_NumTimedParts> g_SaveStateDownloadTimings = {};
 
-	memSavingState saveme(destlist->GetBuffer());
+bool SaveState_DownloadStateInto(ArchiveEntryList& destlist, Error* error)
+{
+	// Rollback fork: the buffer is reused between snapshots. Allocating (and zero-filling) 64 MiB per
+	// snapshot used to dominate the snapshot time. Entries record their own offset and size, so a buffer
+	// that is larger than the data does not matter.
+	destlist.Clear();
+	if (destlist.GetBuffer().size() < 1024 * 1024 * 64)
+		destlist.GetBuffer().resize(1024 * 1024 * 64);
+
+	Common::Timer timer;
+	memSavingState saveme(destlist.GetBuffer());
 	ArchiveEntry internals(EntryFilename_InternalStructures);
 	internals.SetDataIndex(saveme.GetCurrentPos());
 
 	if (!saveme.FreezeBios())
 	{
 		Error::SetString(error, "FreezeBios() failed");
-		return nullptr;
+		return false;
 	}
 
 	if (!saveme.FreezeInternals(error))
@@ -853,28 +862,45 @@ std::unique_ptr<ArchiveEntryList> SaveState_DownloadState(Error* error)
 		if (!error->IsValid())
 			Error::SetString(error, "FreezeInternals() failed");
 
-		return nullptr;
+		return false;
 	}
 
 	internals.SetDataSize(saveme.GetCurrentPos() - internals.GetDataIndex());
-	destlist->Add(internals);
+	destlist.Add(internals);
+	g_SaveStateDownloadTimings[0] = timer.GetTimeMillisecondsAndReset();
 
-	for (const std::unique_ptr<BaseSavestateEntry>& entry : SavestateEntries)
+	for (size_t i = 0; i < std::size(SavestateEntries); i++)
 	{
+		const std::unique_ptr<BaseSavestateEntry>& entry = SavestateEntries[i];
 		uint startpos = saveme.GetCurrentPos();
 		if (!entry->FreezeOut(saveme))
 		{
 			Error::SetString(error, fmt::format("FreezeOut() failed for {}.", entry->GetFilename()));
-			destlist.reset();
-			break;
+			return false;
 		}
 
-		destlist->Add(
+		destlist.Add(
 			ArchiveEntry(entry->GetFilename())
 				.SetDataIndex(startpos)
 				.SetDataSize(saveme.GetCurrentPos() - startpos));
+		g_SaveStateDownloadTimings[i + 1] = timer.GetTimeMillisecondsAndReset();
 	}
 
+	return true;
+}
+
+const char* SaveState_GetTimedPartName(size_t index)
+{
+	if (index == 0)
+		return EntryFilename_InternalStructures;
+	return (index <= std::size(SavestateEntries)) ? SavestateEntries[index - 1]->GetFilename() : "?";
+}
+
+std::unique_ptr<ArchiveEntryList> SaveState_DownloadState(Error* error)
+{
+	std::unique_ptr<ArchiveEntryList> destlist = std::make_unique<ArchiveEntryList>();
+	if (!SaveState_DownloadStateInto(*destlist, error))
+		destlist.reset();
 	return destlist;
 }
 

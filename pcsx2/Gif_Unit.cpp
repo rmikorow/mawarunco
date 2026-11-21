@@ -194,12 +194,23 @@ bool SaveStateBase::gifPathFreeze(u32 path)
 	pxAssertMsg(!gifPath.gsPack.readAmount, "GS Pack readAmount should be 0!");
 	pxAssertMsg(!gifPath.GetPendingGSPackets(), "MTVU GS Pack Queue should be 0!");
 
-	if (!gifPath.isMTVU())
-	{ // FixMe: savestate freeze bug (Gust games) with MTVU enabled
-		if (IsSaving())
-		{                            // Move all the buffered data to the start of buffer
-			gifPath.RealignPacket(); // May add readAmount which we need to clear on load
-		}
+	if (IsSaving() && !gifPath.isMTVU())
+	{
+		// Rollback fork: write the path as RealignPacket() would leave it (current packet at the start of
+		// the buffer), but without realigning the live buffer. Taking a snapshot must not change emulator
+		// state, or a run with per-frame snapshots differs from one without. The written data is the same
+		// as before, so the format does not change.
+		const s32 offset = gifPath.curOffset - gifPath.gsPack.size;
+		alignas(Gif_Path) u8 copy_storage[sizeof(Gif_Path)];
+		std::memcpy(copy_storage, static_cast<void*>(&gifPath), sizeof(Gif_Path));
+		Gif_Path& copy = *reinterpret_cast<Gif_Path*>(copy_storage);
+		copy.curSize -= offset;
+		copy.curOffset = gifPath.gsPack.size;
+		copy.gsPack.offset = 0;
+		Freeze(gifPath.mtvu.fakePackets);
+		FreezeMem(&copy, sizeof(gifPath) - sizeof(gifPath.mtvu));
+		FreezeMem(&gifPath.buffer[offset], copy.curSize);
+		return IsOkay();
 	}
 	u8* bufferPtr = gifPath.buffer; // Backup current buffer ptr
 	Freeze(gifPath.mtvu.fakePackets);
