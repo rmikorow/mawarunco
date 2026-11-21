@@ -2280,6 +2280,11 @@ void VMManager::ResetFrameLimiter()
 	s_limiter_frame_start = GetCPUTicks();
 }
 
+void VMManager::Internal::DelayFrameLimiter(double ms)
+{
+	s_limiter_frame_start += static_cast<u64>(ms * static_cast<double>(GetTickFrequency()) / 1000.0);
+}
+
 void VMManager::Internal::Throttle()
 {
 	if (s_target_speed == 0.0f || s_use_vsync_for_timing || Rollback::g_resimulating)

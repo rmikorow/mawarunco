@@ -333,6 +333,9 @@ namespace VMManager
 		void EntryPointCompilingOnCPUThread();
 		void VSyncOnCPUThread();
 		void PollInputOnCPUThread();
+
+		/// Rollback fork: moves the frame limiter's schedule later by the given time (netplay time sync).
+		void DelayFrameLimiter(double ms);
 	} // namespace Internal
 } // namespace VMManager
 

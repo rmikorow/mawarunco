@@ -8,6 +8,7 @@
 #include "Host.h"
 #include "IconsFontAwesome.h"
 #include "R5900.h"
+#include "VMManager.h"
 
 #include "common/Console.h"
 #include "common/Error.h"
@@ -67,6 +68,7 @@ namespace Netplay
 	static int s_req_index = 0;
 	static bool s_was_running = false;
 	static Common::Timer::Value s_wait_until = 0;
+	static int s_timesync_frame = -1; // frame for which the time sync wait was applied
 
 	struct Stats
 	{
@@ -76,6 +78,7 @@ namespace Netplay
 		u64 resimulated = 0;
 		u64 waits = 0;
 		u32 max_rollback = 0;
+		double timesync_ms = 0.0;
 	};
 	static Stats s_stats;
 	static u32 s_rollback_depth = 0; // advances since the last load in the current request list
@@ -253,6 +256,7 @@ bool Netplay::Start(const Options& opts, Error* error)
 	s_req_count = s_req_index = 0;
 	s_was_running = false;
 	s_wait_until = 0;
+	s_timesync_frame = -1;
 	s_stats = {};
 
 	if (opts.synctest)
@@ -300,8 +304,10 @@ void Netplay::LogStats()
 			net = fmt::format(", ping {} ms, frames ahead {}, remote behind {}", ns.ping_ms, ggrs_frames_ahead(s_session),
 				ns.remote_frames_behind);
 	}
-	Console.WriteLn(fmt::format("NETPLAY STATS: frame {}, {} rollbacks, {} frames resimulated (max depth {}), {} waits{}",
-		s_stats.real_frames, s_stats.rollbacks, s_stats.resimulated, s_stats.max_rollback, s_stats.waits, net));
+	Console.WriteLn(fmt::format("NETPLAY STATS: frame {}, {} rollbacks, {} frames resimulated (max depth {}), {} waits, "
+								"time sync {:.0f} ms{}",
+		s_stats.real_frames, s_stats.rollbacks, s_stats.resimulated, s_stats.max_rollback, s_stats.waits,
+		s_stats.timesync_ms, net));
 }
 
 void Netplay::Fail(std::string_view what)
@@ -392,6 +398,24 @@ bool Netplay::AdvanceSession()
 		{
 			Console.WriteLn("Netplay: connected, running");
 			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_NETWORK_WIRED, "Netplay: connected.", Host::OSD_INFO_DURATION);
+		}
+	}
+
+	// Time synchronization: the peer that runs ahead runs each frame slightly longer (1 ms per frame
+	// ahead, at most 4 ms) until both are on the same timeline. Otherwise the leading peer keeps hitting
+	// the prediction window and rolls back far more often than the connection requires (GGRS only
+	// recommends a wait from 3 frames on). This moves the frame limiter's schedule: plain waits do not
+	// work, because the limiter keeps an absolute schedule and catches up afterwards.
+	if (!s_options.synctest)
+	{
+		const int frame = ggrs_current_frame(s_session);
+		const int ahead = ggrs_frames_ahead(s_session);
+		if (ahead > 0 && frame != s_timesync_frame)
+		{
+			s_timesync_frame = frame;
+			const double ms = static_cast<double>(std::min(ahead, 4));
+			VMManager::Internal::DelayFrameLimiter(ms);
+			s_stats.timesync_ms += ms;
 		}
 	}
 
@@ -547,9 +571,9 @@ void Netplay::HandleEvents()
 					Host::OSD_INFO_DURATION);
 				break;
 			case GGRS_EVENT_WAIT_RECOMMENDATION:
-				// This peer runs ahead: pause for the recommended frames so the other side catches up.
-				s_wait_until = Common::Timer::GetCurrentValue() +
-							   Common::Timer::ConvertMillisecondsToValue(FRAME_MS * static_cast<double>(e.a));
+				// This peer runs far ahead: delay the schedule by the recommended frames.
+				VMManager::Internal::DelayFrameLimiter(FRAME_MS * static_cast<double>(e.a));
+				s_stats.timesync_ms += FRAME_MS * static_cast<double>(e.a);
 				break;
 			case GGRS_EVENT_DESYNC_DETECTED:
 				Console.Error(fmt::format("Netplay: DESYNC at frame {} (local {:016x}{:016x}, remote {:016x}{:016x})", e.a,
