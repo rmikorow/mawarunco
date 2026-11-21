@@ -54,6 +54,7 @@ static tlbs s_tlb_backup[std::size(tlb)];
 static bool s_incremental_ram_restore = false;
 static constexpr u32 RESTORE_PAGE_SIZE = 0x1000;
 static bool s_restore_clear_iop_code = true;
+static bool s_restore_clear_ee_code = true;
 
 static void PreLoadPrep(bool clear_cpu_caches = true)
 {
@@ -611,7 +612,9 @@ public:
 		{
 			if (std::memcmp(dst + off, src.data() + off, RESTORE_PAGE_SIZE) == 0)
 				continue;
-			Cpu->Clear(off, RESTORE_PAGE_SIZE / 4);
+			// Diagnostics: [EmuCore/Rollback] RestoreClearEECode = false keeps EE code in changed pages.
+			if (s_restore_clear_ee_code)
+				Cpu->Clear(off, RESTORE_PAGE_SIZE / 4);
 			std::memcpy(dst + off, src.data() + off, RESTORE_PAGE_SIZE);
 		}
 		return true;
@@ -1377,6 +1380,13 @@ bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error, bool c
 	PreLoadPrep(clear_cpu_caches);
 	s_incremental_ram_restore = !clear_cpu_caches;
 	s_restore_clear_iop_code = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "RestoreClearIOPCode", true);
+	s_restore_clear_ee_code = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "RestoreClearEECode", true);
+	if (!clear_cpu_caches && !s_restore_clear_ee_code)
+	{
+		// Diagnostics: drop the write protection so restoring RAM does not fault into the mmap handler
+		// (which would clear the code). Self-modifying code is not detected until pages are re-protected.
+		mmap_ResetBlockTracking();
+	}
 	ScopedGuard incremental_guard([]() { s_incremental_ram_restore = false; });
 
 	// The internal structures start at offset 0 of the buffer (see SaveState_DownloadState).
