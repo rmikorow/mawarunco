@@ -9,6 +9,7 @@
 #include "IopBios.h"
 #include "IopHw.h"
 #include "Common.h"
+#include "common/ScopedGuard.h"
 #include "common/HeapArray.h"
 #include "VMManager.h"
 
@@ -1630,6 +1631,11 @@ static void PreBlockCheck(u32 blockpc)
 
 static void iopRecRecompile(const u32 startpc)
 {
+	// Rollback fork: the analysis below writes psxRegs.code. Restore it afterwards, so that the field
+	// (part of the savestate) does not depend on whether a block was compiled in this frame.
+	const u32 saved_code = psxRegs.code;
+	ScopedGuard restore_code([saved_code]() { psxRegs.code = saved_code; });
+
 	u32 i;
 	u32 link_next_block = 0;
 

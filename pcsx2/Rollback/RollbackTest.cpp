@@ -51,10 +51,9 @@ namespace RollbackTest
 	static std::unique_ptr<ArchiveEntryList> s_start_state;
 	static std::unique_ptr<ArchiveEntryList> s_end_state;
 	// Emulation state that is not part of the savestate format but must be carried by rollback
-	// snapshots (see g_eeCycleFrac and SPU2::SaveVoiceBuffers).
+	// snapshots (see iopEventAction and SPU2::SaveVoiceBuffers).
 	struct Extras
 	{
-		u32 ee_cycle_frac = 0;
 		// Set at the end of an EE event test and consumed by the next one (runs the IOP even when it is
 		// ahead). Snapshots are taken in between, and the savestate format does not include it.
 		bool iop_event_action = false;
@@ -62,7 +61,7 @@ namespace RollbackTest
 
 		bool operator==(const Extras& o) const
 		{
-			return ee_cycle_frac == o.ee_cycle_frac && iop_event_action == o.iop_event_action &&
+			return iop_event_action == o.iop_event_action &&
 				   spu2_voice_buffers == o.spu2_voice_buffers;
 		}
 	};
@@ -72,7 +71,6 @@ namespace RollbackTest
 	static Extras CaptureExtras()
 	{
 		Extras e;
-		e.ee_cycle_frac = g_eeCycleFrac;
 		e.iop_event_action = iopEventAction;
 		SPU2::SaveVoiceBuffers(e.spu2_voice_buffers);
 		return e;
@@ -80,7 +78,6 @@ namespace RollbackTest
 
 	static void RestoreExtras(const Extras& e)
 	{
-		g_eeCycleFrac = e.ee_cycle_frac;
 		iopEventAction = e.iop_event_action;
 		SPU2::LoadVoiceBuffers(e.spu2_voice_buffers);
 	}
@@ -439,7 +436,7 @@ u64 RollbackTest::HashMemory(const u8* data, size_t size)
 RollbackTest::FrameTrace RollbackTest::TakeTrace()
 {
 	return FrameTrace{
-		cpuRegs.cycle * 8 + g_eeCycleFrac,
+		cpuRegs.cycle,
 		psxRegs.cycle,
 		HashMemory(eeMem->Main, Ps2MemSize::ExposedRam),
 		HashMemory(iopMem->Main, Ps2MemSize::ExposedIopRam),
@@ -906,9 +903,9 @@ void RollbackTest::OnExecutionExited()
 		LogResimStats();
 		bool same = CompareSnapshots(*s_end_state, *replay_state);
 		const Extras replay_extras = CaptureExtras();
-		if (replay_extras.ee_cycle_frac != s_end_extras.ee_cycle_frac)
+		if (replay_extras.iop_event_action != s_end_extras.iop_event_action)
 		{
-			Console.Error(fmt::format("  g_eeCycleFrac: {} vs {}", s_end_extras.ee_cycle_frac, replay_extras.ee_cycle_frac));
+			Console.Error(fmt::format("  iopEventAction: {} vs {}", s_end_extras.iop_event_action, replay_extras.iop_event_action));
 			same = false;
 		}
 		if (replay_extras.spu2_voice_buffers != s_end_extras.spu2_voice_buffers)
