@@ -4,6 +4,7 @@
 #include <time.h>
 #include <cmath>
 
+#include "Rollback/LatencyTest.h"
 #include "Common.h"
 #include "R3000A.h"
 #include "Counters.h"
@@ -491,11 +492,25 @@ static __fi void VSyncStart(u64 sCycle)
 	DoFMVSwitch();
 	VMManager::Internal::VSyncOnCPUThread();
 
+	// Rollback fork: optionally hand the frame to the GS before the limiter sleeps, so a finished frame is
+	// shown right away instead of after the sleep (lower input latency, presentation follows emulation
+	// time instead of the limiter schedule). [EmuCore/Rollback] PresentBeforeThrottle.
+	const bool present_first = LatencyTest::PresentBeforeThrottle();
+	if (present_first)
+	{
+		gsPostVsyncStart();
+		LatencyTest::OnVsyncPosted();
+	}
+
 	// Don't bother throttling if we're going to pause.
 	if (!VMManager::Internal::IsExecutionInterrupted())
 		VMManager::Internal::Throttle();
 
-	gsPostVsyncStart(); // MUST be after framelimit; doing so before causes funk with frame times!
+	if (!present_first)
+	{
+		gsPostVsyncStart(); // MUST be after framelimit; doing so before causes funk with frame times!
+		LatencyTest::OnVsyncPosted();
+	}
 
 	// Poll input after MTGS frame push, just in case it has to stall to catch up.
 	VMManager::Internal::PollInputOnCPUThread();

@@ -4,6 +4,7 @@
 #include "GS.h"
 #include "Gif_Unit.h"
 #include "MTGS.h"
+#include "Rollback/LatencyTest.h"
 #include "Rollback/Rollback.h"
 #include "MTVU.h"
 #include "Host.h"
@@ -505,6 +506,7 @@ void MTGS::MainLoop()
 
 							// CSR & 0x2000; is the pageflip id.
 							GSvsync((((u32&)RingBuffer.Regs[0x1000]) & 0x2000) ? 0 : 1, remainder[4] != 0, remainder[5] != 0);
+							LatencyTest::OnVsyncPresented();
 
 							s_QueuedFrameCount.fetch_sub(1);
 							if (s_VsyncSignalListener.exchange(false))

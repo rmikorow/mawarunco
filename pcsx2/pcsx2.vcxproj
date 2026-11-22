@@ -290,6 +290,7 @@
     <ClCompile Include="Recording\InputRecordingControls.cpp" />
     <ClCompile Include="Recording\InputRecordingFile.cpp" />
     <ClCompile Include="Recording\PadData.cpp" />
+    <ClCompile Include="Rollback\LatencyTest.cpp" />
     <ClCompile Include="Rollback\Netplay.cpp" />
     <ClCompile Include="Rollback\Rollback.cpp" />
     <ClCompile Include="Rollback\RollbackTest.cpp" />
@@ -740,6 +741,7 @@
     <ClInclude Include="Recording\InputRecordingControls.h" />
     <ClInclude Include="Recording\InputRecordingFile.h" />
     <ClInclude Include="Recording\PadData.h" />
+    <ClInclude Include="Rollback\LatencyTest.h" />
     <ClInclude Include="Rollback\Netplay.h" />
     <ClInclude Include="Rollback\Rollback.h" />
     <ClInclude Include="Rollback\RollbackTest.h" />

@@ -32,6 +32,7 @@
 #include "Recording/InputRecording.h"
 #include "Recording/InputRecordingControls.h"
 #include "Rollback/Rollback.h"
+#include "Rollback/LatencyTest.h"
 #include "Rollback/Netplay.h"
 #include "Rollback/RollbackTest.h"
 #include "SIO/Memcard/MemoryCardFile.h"
@@ -1681,6 +1682,7 @@ void VMManager::Shutdown(bool save_resume_state)
 		g_InputRecording.stop();
 
 	RollbackTest::Abort();
+	LatencyTest::Abort();
 	Netplay::Stop();
 
 	SaveSessionTime(s_disc_serial);
@@ -1815,6 +1817,7 @@ void VMManager::Reset()
 	}
 
 	RollbackTest::Abort();
+	LatencyTest::Abort();
 	Netplay::Stop();
 
 	ResetFrameLimiter();
@@ -1913,6 +1916,7 @@ bool VMManager::DoLoadState(const char* filename, Error* error)
 	Host::OnSaveStateLoading(filename);
 
 	RollbackTest::Abort();
+	LatencyTest::Abort();
 	Netplay::Stop();
 
 	if (!SaveState_UnzipFromDisk(filename, error))
@@ -2786,6 +2790,7 @@ void VMManager::Execute()
 
 	// Rollback netplay and self-test: snapshots and restores happen here, outside of the CPU loop.
 	Netplay::OnExecutionExited();
+	LatencyTest::OnExecutionExited();
 	RollbackTest::OnExecutionExited();
 }
 
@@ -2992,6 +2997,7 @@ void VMManager::Internal::PollInputOnCPUThread()
 {
 	Host::PumpMessagesOnCPUThread();
 	InputManager::PollSources();
+	LatencyTest::OnInputPolledHost();
 
 	if (EmuConfig.EnableRecordingTools)
 	{
@@ -3014,6 +3020,8 @@ void VMManager::Internal::PollInputOnCPUThread()
 	// Rollback: netplay owns the frame boundary while active, the self-test only runs without it.
 	if (Netplay::IsActive())
 		Netplay::OnInputPolled();
+	else if (LatencyTest::IsActive())
+		LatencyTest::OnInputPolled();
 	else
 		RollbackTest::OnInputPolled();
 }

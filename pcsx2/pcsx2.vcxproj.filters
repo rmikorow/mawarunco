@@ -1130,6 +1130,9 @@
     <ClCompile Include="Recording\InputRecordingFile.cpp">
       <Filter>Tools\Input Recording</Filter>
     </ClCompile>
+    <ClCompile Include="Rollback\LatencyTest.cpp">
+      <Filter>Tools\Input Recording</Filter>
+    </ClCompile>
     <ClCompile Include="Rollback\Netplay.cpp">
       <Filter>Tools\Input Recording</Filter>
     </ClCompile>
@@ -2089,6 +2092,9 @@
       <Filter>Tools\Input Recording</Filter>
     </ClInclude>
     <ClInclude Include="Recording\InputRecordingFile.h">
+      <Filter>Tools\Input Recording</Filter>
+    </ClInclude>
+    <ClInclude Include="Rollback\LatencyTest.h">
       <Filter>Tools\Input Recording</Filter>
     </ClInclude>
     <ClInclude Include="Rollback\Netplay.h">
