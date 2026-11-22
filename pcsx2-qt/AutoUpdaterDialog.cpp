@@ -97,6 +97,11 @@ AutoUpdaterDialog::~AutoUpdaterDialog() = default;
 
 bool AutoUpdaterDialog::isSupported()
 {
+	// Rollback fork: never update. The updater would replace this build with an official PCSX2 release
+	// (which has no netplay), and the fork's own tags would otherwise switch it on.
+	return false;
+
+#if 0
 	// Logic to detect whether we can use the auto updater.
 	// We use tagged commit, because this gets set on nightly builds.
 	if (!BuildVersion::GitTaggedCommit)
@@ -116,6 +121,7 @@ bool AutoUpdaterDialog::isSupported()
 	return true;
 #else
 	return false;
+#endif
 #endif
 }
 
