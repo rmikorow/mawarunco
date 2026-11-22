@@ -9,6 +9,7 @@
 #include "Config.h"
 #include "Host.h"
 #include "IconsFontAwesome.h"
+#include "Memory.h"
 #include "R5900.h"
 #include "VMManager.h"
 
@@ -27,6 +28,7 @@
 #define XXH_INLINE_ALL 1
 #include "xxhash.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <memory>
@@ -52,6 +54,7 @@ namespace Netplay
 		bool sparse_saving = false;
 		bool test_input = false; // testing: generated local input instead of the host controller
 		bool dump = false;       // diagnostics: write the snapshots of frames 0 and 60 to the log folder
+		int desync_test = -1;    // testing: player 2 changes one byte of EE RAM in this frame (desync diagnostics)
 	};
 
 	static constexpr u32 NUM_PLAYERS = Rollback::NUM_PORTS;
@@ -70,6 +73,7 @@ namespace Netplay
 	static int s_req_count = 0;
 	static int s_req_index = 0;
 	static bool s_was_running = false;
+	static int s_advance_frame = -1; // frame the next advance emulates (from the save before it)
 	static int s_timesync_frame = -1; // frame for which the time sync wait was applied
 	static Common::Timer s_wait_timer; // since the session started (shown while waiting for the peer)
 	static u32 s_wait_shown_seconds = ~0u;
@@ -112,12 +116,26 @@ namespace Netplay
 	static void ProcessRequests();
 	static void HandleEvents();
 	static bool AdvanceSession();
-	static std::pair<u64, u64> Checksum(const Rollback::Snapshot& snapshot);
+	static std::pair<u64, u64> Checksum(const Rollback::Snapshot& snapshot, int frame);
+	static void LogDesyncMap(int frame);
+
+	// Desync diagnostics: per-block hashes of the gameplay memory of the last checksum frames. When GGRS
+	// reports a desync for a frame, both peers log the hashes of that frame; comparing the two logs shows
+	// which memory region ran apart first.
+	struct Fingerprint
+	{
+		int frame = -1;
+		std::vector<std::pair<std::string, std::vector<u32>>> parts; // gameplay parts, one hash per block
+		std::vector<std::pair<std::string, u32>> others;            // other savestate parts, one hash each
+	};
+	static constexpr size_t FINGERPRINT_BLOCK = 64 * 1024;
+	static std::array<Fingerprint, 16> s_fingerprints;
 	static std::string LastGgrsError();
 	static Rollback::PadInput LocalInput(u32 port);
 	static void DumpSnapshot(const Rollback::Snapshot& snapshot, int frame);
 	static void Fail(std::string_view what);
 } // namespace Netplay
+
 
 std::string Netplay::LastGgrsError()
 {
@@ -237,6 +255,13 @@ bool Netplay::SetLaunchOptions(std::string_view spec, Error* error)
 			// Boot the game with the shortcut instead of loading a shared savestate ("boot" = built-in script).
 			if (!BootShortcut::Request(value.empty() ? std::string_view("vs2p") : value, error))
 				return false;
+		}
+		else if (key == "desynctest")
+		{
+			const std::optional<u32> v = number(1000000);
+			if (!v)
+				return false;
+			opts.desync_test = static_cast<int>(*v);
 		}
 		else if (key == "dump")
 		{
@@ -574,6 +599,7 @@ void Netplay::ProcessRequests()
 		if (kind == GGRS_REQUEST_SAVE)
 		{
 			const int frame = ggrs_request_frame(s_session, index);
+			s_advance_frame = frame;
 			const u32 slot = static_cast<u32>(frame) % static_cast<u32>(s_ring.size());
 			const bool presaved = (frame == s_ra_presaved_frame && !s_list_had_load);
 			s_ra_presaved_frame = -1;
@@ -585,7 +611,7 @@ void Netplay::ProcessRequests()
 			// Checksums cost about 2 ms, so only compute them where GGRS can use them.
 			const bool want_checksum = s_options.synctest || s_options.sparse_saving ||
 									   (s_options.desync_interval > 0 && (frame % s_options.desync_interval) == 0);
-			const auto [lo, hi] = want_checksum ? Checksum(*s_ring[slot]) : std::pair<u64, u64>(0, 0);
+			const auto [lo, hi] = want_checksum ? Checksum(*s_ring[slot], frame) : std::pair<u64, u64>(0, 0);
 			ggrs_request_save(s_session, index, slot, want_checksum, lo, hi);
 			if (s_options.dump && (frame <= 12 || frame == 60))
 				DumpSnapshot(*s_ring[slot], frame);
@@ -609,6 +635,13 @@ void Netplay::ProcessRequests()
 			ggrs_request_inputs(s_session, index, reinterpret_cast<u8*>(inputs.data()), nullptr);
 			for (u32 port = 0; port < NUM_PLAYERS; port++)
 				Rollback::SetInput(port, inputs[port]);
+
+			// Testing the desync diagnostics: a deliberate difference on one peer, also in resimulated frames.
+			if (s_options.desync_test >= 0 && s_advance_frame == s_options.desync_test && s_options.local_player == 1)
+			{
+				eeMem->Main[0x1000000] ^= 0x01;
+				Console.Warning(fmt::format("Netplay: desync test, changed EE RAM 0x1000000 in frame {}", s_advance_frame));
+			}
 
 			// Further advances in this list follow: this frame is resimulated.
 			bool more = false;
@@ -721,6 +754,7 @@ void Netplay::HandleEvents()
 			case GGRS_EVENT_DESYNC_DETECTED:
 				Console.Error(fmt::format("Netplay: DESYNC at frame {} (local {:016x}{:016x}, remote {:016x}{:016x})", e.a,
 					e.local_checksum_hi, e.local_checksum_lo, e.remote_checksum_hi, e.remote_checksum_lo));
+				LogDesyncMap(static_cast<int>(e.a));
 				// At the first comparison the peers never ran apart: they started from different states.
 				// With the boot shortcut that means a different BIOS, disc image or settings.
 				Host::AddIconOSDMessage(OSD_KEY, ICON_FA_TRIANGLE_EXCLAMATION,
@@ -794,27 +828,80 @@ Rollback::PadInput Netplay::LocalInput(u32 port)
 	return input;
 }
 
-std::pair<u64, u64> Netplay::Checksum(const Rollback::Snapshot& snapshot)
+std::pair<u64, u64> Netplay::Checksum(const Rollback::Snapshot& snapshot, int frame)
 {
 	// Gameplay state only. The internal structures contain host pointers, and GS state differs between
-	// renderers, so neither is comparable between two machines.
+	// renderers, so neither is comparable between two machines. The checksum is a hash over per-block
+	// hashes, which are kept for the desync diagnostics (same cost as hashing the parts directly).
 	static constexpr const char* parts[] = {
 		"eeMemory.bin", "iopMemory.bin", "Scratchpad.bin", "vu0Memory.bin", "vu1Memory.bin"};
 
+	Fingerprint& fp = s_fingerprints[static_cast<size_t>(frame / std::max<u32>(s_options.desync_interval, 1)) %
+									 s_fingerprints.size()];
+	fp.frame = frame;
+	fp.parts.clear();
+	fp.others.clear();
+
 	XXH3_state_t state;
 	XXH3_128bits_reset(&state);
+	for (const char* part : parts)
+	{
+		for (size_t i = 0; i < snapshot.state.GetLength(); i++)
+		{
+			const ArchiveEntry& entry = snapshot.state[i];
+			if (entry.GetFilename() != part)
+				continue;
+			const u8* data = snapshot.state.GetPtr(entry.GetDataIndex());
+			const size_t size = entry.GetDataSize();
+			std::vector<u32> blocks;
+			blocks.reserve((size + FINGERPRINT_BLOCK - 1) / FINGERPRINT_BLOCK);
+			for (size_t off = 0; off < size; off += FINGERPRINT_BLOCK)
+			{
+				const XXH64_hash_t h = XXH3_64bits(data + off, std::min(FINGERPRINT_BLOCK, size - off));
+				XXH3_128bits_update(&state, &h, sizeof(h));
+				blocks.push_back(static_cast<u32>(h));
+			}
+			fp.parts.emplace_back(part, std::move(blocks));
+			break;
+		}
+	}
+
+	// The rest only for the diagnostics (not compared by GGRS).
 	for (size_t i = 0; i < snapshot.state.GetLength(); i++)
 	{
 		const ArchiveEntry& entry = snapshot.state[i];
-		for (const char* part : parts)
-		{
-			if (entry.GetFilename() == part)
-			{
-				XXH3_128bits_update(&state, snapshot.state.GetPtr(entry.GetDataIndex()), entry.GetDataSize());
-				break;
-			}
-		}
+		const std::string& name = entry.GetFilename();
+		if (name == "PCSX2 Internal Structures.dat" ||
+			std::any_of(std::begin(parts), std::end(parts), [&name](const char* p) { return name == p; }))
+			continue;
+		fp.others.emplace_back(name,
+			static_cast<u32>(XXH3_64bits(snapshot.state.GetPtr(entry.GetDataIndex()), entry.GetDataSize())));
 	}
+
 	const XXH128_hash_t hash = XXH3_128bits_digest(&state);
 	return {hash.low64, hash.high64};
+}
+
+void Netplay::LogDesyncMap(int frame)
+{
+	const auto it = std::find_if(s_fingerprints.begin(), s_fingerprints.end(),
+		[frame](const Fingerprint& fp) { return fp.frame == frame; });
+	if (it == s_fingerprints.end())
+	{
+		Console.Error(fmt::format("DESYNC MAP frame {}: no fingerprint kept", frame));
+		return;
+	}
+	// One line per part: block size and the low 32 bits of each block's hash. Compare with the other
+	// peer's log (same frame) to find the first differing block: address = block index * block size.
+	for (const auto& [name, blocks] : it->parts)
+	{
+		std::string line = fmt::format("DESYNC MAP frame {} {} block {:x}:", frame, name, FINGERPRINT_BLOCK);
+		for (const u32 h : blocks)
+			line += fmt::format(" {:08x}", h);
+		Console.WriteLn(line);
+	}
+	std::string others = fmt::format("DESYNC MAP frame {} others:", frame);
+	for (const auto& [name, h] : it->others)
+		others += fmt::format(" {}={:08x}", name, h);
+	Console.WriteLn(others);
 }

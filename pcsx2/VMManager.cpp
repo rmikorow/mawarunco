@@ -530,6 +530,34 @@ void VMManager::UpdateLoggingSettings(SettingsInterface& si)
 	if (file_logging_enabled != Log::IsFileOutputEnabled() || (EmuConfig.Trace.Enabled && Log::GetMaxLevel() < LOGLEVEL_TRACE))
 	{
 		std::string path = Path::Combine(EmuFolders::Logs, "emulog.txt");
+
+		// Rollback fork: keep the logs of earlier runs (players send them after a netplay test, often after
+		// starting the program again). The previous emulog.txt becomes emulog-<date>-<time>.txt; the newest
+		// ten are kept.
+		static bool s_logs_rotated = false;
+		if (file_logging_enabled && !std::exchange(s_logs_rotated, true))
+		{
+			FILESYSTEM_STAT_DATA sd;
+			if (FileSystem::StatFile(path.c_str(), &sd) && sd.Size > 0)
+			{
+				std::tm tm{};
+#ifdef _WIN32
+				localtime_s(&tm, &sd.ModificationTime);
+#else
+				localtime_r(&sd.ModificationTime, &tm);
+#endif
+				const std::string old_log = Path::Combine(EmuFolders::Logs,
+					fmt::format("emulog-{:04}{:02}{:02}-{:02}{:02}{:02}.txt", tm.tm_year + 1900, tm.tm_mon + 1,
+						tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec));
+				FileSystem::RenamePath(path.c_str(), old_log.c_str());
+			}
+			FileSystem::FindResultsArray old_logs;
+			FileSystem::FindFiles(EmuFolders::Logs.c_str(), "emulog-*.txt", FILESYSTEM_FIND_FILES | FILESYSTEM_FIND_SORT_BY_NAME,
+				&old_logs);
+			for (size_t i = 0; i + 10 < old_logs.size(); i++)
+				FileSystem::DeleteFilePath(old_logs[i].FileName.c_str());
+		}
+
 		Log::SetFileOutputLevel(file_logging_enabled ? EmuConfig.Trace.Enabled ? LOGLEVEL_TRACE : level : LOGLEVEL_NONE, std::move(path));
 	}
 }
