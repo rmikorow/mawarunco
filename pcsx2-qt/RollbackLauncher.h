@@ -7,7 +7,8 @@
 
 #include <string>
 
-class QComboBox;
+class QButtonGroup;
+class QStackedWidget;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -46,10 +47,12 @@ private:
 	bool refreshStatus();
 	/// Saves the chosen delay and address, sets the BIOS and both controller ports, boots the game.
 	void boot(const std::string& netplay_spec, const char* shortcut);
+	int selectedDelay() const;
 
 	QLabel* m_bios_status = nullptr;
 	QLabel* m_game_status = nullptr;
-	QComboBox* m_delay = nullptr;
+	QStackedWidget* m_pages = nullptr;
+	QButtonGroup* m_delay_group = nullptr; // id = delay in frames
 	QLineEdit* m_host_address = nullptr;
 	QPushButton* m_host_button = nullptr;
 	QPushButton* m_join_button = nullptr;
