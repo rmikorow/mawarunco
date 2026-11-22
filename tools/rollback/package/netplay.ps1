@@ -13,7 +13,6 @@ $Delay = 1        # input delay in frames
 $Rollback = 2     # maximum rollback depth in frames
 
 # Reference hashes of the organizer's files (only hashes, no content).
-$ExpectedIsoSha256 = '__ISO_SHA256__'
 $ExpectedBiosSha256 = '__BIOS_SHA256__'
 $ExpectedBiosName = '__BIOS_NAME__'
 # ---------------------------------------------------------------------------------------------------
@@ -79,16 +78,14 @@ if ($Mode -eq 'setup') {
 }
 
 # ---- Disc image -------------------------------------------------------------------------------------
-$iso = Get-ChildItem (Join-Path $root 'game') -File -Include *.iso -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+# Any dump of the game is accepted (no hash check): dumps made with different tools can differ in
+# padding while the game data is the same. If a dump really differs, desync detection reports it.
+$iso = Get-ChildItem (Join-Path $root 'game') -File -Include *.iso, *.chd, *.cso, *.zso, *.cue -Recurse -ErrorAction SilentlyContinue |
+    Select-Object -First 1
 if (-not $iso) {
-    Stop-WithMessage 'Kein Spiel gefunden. Bitte das eigene ISO von Fate/unlimited codes (SLPM-55108) in den Ordner "game" kopieren.'
+    Stop-WithMessage 'Kein Spiel gefunden. Bitte das eigene Abbild von Fate/unlimited codes (SLPM-55108, .iso/.chd/.cso/.cue) in den Ordner "game" kopieren.'
 }
 Write-Host "Spiel: $($iso.Name)"
-Write-Host 'Pruefe das ISO (dauert ein paar Sekunden) ...'
-$isoHash = Get-Sha256 $iso.FullName
-if ($isoHash -ne $ExpectedIsoSha256) {
-    Confirm-Continue 'Achtung: Dieses ISO ist nicht identisch mit dem des Organisators. Netplay wird damit nicht synchron laufen.'
-}
 
 if (-not (Test-Path $state)) {
     Stop-WithMessage 'Die Startdatei "start.p2s" fehlt. Sie muss im selben Ordner wie diese Datei liegen.'

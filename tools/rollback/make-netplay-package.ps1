@@ -1,13 +1,14 @@
 # Builds the netplay test package from the fork's Release build.
 #
-#   .\tools\rollback\make-netplay-package.ps1 -StateFile <start state .p2s> [-ReferenceIso <iso>] [-ReferenceBios <bin>]
+#   .\tools\rollback\make-netplay-package.ps1 -StateFile <start state .p2s> [-ReferenceBios <bin>]
 #
-# Output: dist\FUC-Netplay\ and dist\FUC-Netplay-<date>.zip. The package contains the emulator, sanitized
+# Output: dist\FUC-Netplay-<date>.zip, built in dist\.staging\ (private to this script, deleted and
+# recreated on every run; to test the package, unzip it somewhere else). The package contains the emulator, sanitized
 # settings, the launcher, the tester guide, licenses and the fork's source patch. It never contains a
-# BIOS or a disc image; the reference files are only used to compute SHA-256 hashes for the launcher.
+# BIOS or a disc image; the reference BIOS is only used to compute a SHA-256 hash for the launcher.
+# The disc image is not checked: any dump of the game is accepted.
 param(
     [string]$StateFile = '',
-    [string]$ReferenceIso = '<path to your disc image>',
     [string]$ReferenceBios = '<path to your BIOS file>',
     [string]$VcRedistDir = 'F:\VisualStudio\2022\Community\VC\Redist\MSVC\14.44.35112\x64\Microsoft.VC143.CRT',
     [string]$RustDir = '<Rust toolchain folder>'
@@ -17,11 +18,14 @@ $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $bin = Join-Path $repo 'bin'
 $dist = Join-Path $repo 'dist'
-$out = Join-Path $dist 'FUC-Netplay'
+# Only this staging folder is ever deleted. Never point it at a folder someone uses (it may hold their
+# BIOS and disc image).
+$staging = Join-Path $dist '.staging'
+$out = Join-Path $staging 'FUC-Netplay'
 $template = Join-Path $PSScriptRoot 'package'
 
 if (-not (Test-Path (Join-Path $bin 'pcsx2-qtx64-clang.exe'))) { throw 'Release build missing (bin\pcsx2-qtx64-clang.exe).' }
-if (Test-Path $out) { Remove-Item $out -Recurse -Force }
+if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
 New-Item -ItemType Directory -Force $out | Out-Null
 
 # ---- Emulator files (no debug symbols, import libraries or the Devel build) -------------------------
@@ -75,10 +79,8 @@ $check = Get-Content (Join-Path $out 'inis\PCSX2.ini') -Raw
 if ($check -match '[A-Z]:\\') { throw 'Sanitized settings still contain an absolute path.' }
 
 # ---- Launcher with reference hashes, guide -----------------------------------------------------------
-$isoHash = (Get-FileHash $ReferenceIso -Algorithm SHA256).Hash
 $biosHash = (Get-FileHash $ReferenceBios -Algorithm SHA256).Hash
 (Get-Content (Join-Path $template 'netplay.ps1') -Raw) `
-    -replace '__ISO_SHA256__', $isoHash `
     -replace '__BIOS_SHA256__', $biosHash `
     -replace '__BIOS_NAME__', (Split-Path $ReferenceBios -Leaf) |
     Set-Content (Join-Path $out 'netplay.ps1') -Encoding UTF8

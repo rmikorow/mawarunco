@@ -13,8 +13,9 @@ ueber die IP-Adresse. Einer ist Host (Spieler 1), der andere verbindet sich
 a) BIOS: Die BIOS-Datei aus deiner eigenen PS2 (4 MB, meist .bin) in den
    Ordner "bios" kopieren.
 
-b) Spiel: Dein ISO von Fate/unlimited codes (SLPM-55108, von deiner eigenen
-   Disc) in den Ordner "game" kopieren. Der Dateiname ist egal.
+b) Spiel: Dein Abbild von Fate/unlimited codes (SLPM-55108, von deiner
+   eigenen Disc) in den Ordner "game" kopieren. Erlaubt sind .iso, .chd,
+   .cso und .bin/.cue. Der Dateiname ist egal.
 
 c) Controller: Ein Xbox-/XInput-Controller wird normalerweise automatisch
    erkannt. Falls die Tasten nicht reagieren: "Einstellungen.bat" starten,
@@ -54,9 +55,9 @@ Beenden: einfach das Spielfenster schliessen.
 3. Gut zu wissen
 ----------------
 
-- Die Startskripte pruefen, ob dein ISO und dein BIOS zu denen des
-  Organisators passen. Ein abweichendes ISO funktioniert nicht. Ein anderes
-  BIOS kann funktionieren, kann aber zu Desyncs fuehren.
+- Die Startskripte pruefen, ob dein BIOS dieselbe Version wie beim
+  Organisator ist. Ein anderes BIOS kann funktionieren, kann aber zu Desyncs
+  fuehren. Beim Spiel-Abbild wird nichts geprueft.
 - Memory Cards sind waehrend des Online-Spiels abgeschaltet. Das ist Absicht.
 - Erscheint oben "desync detected", laufen die beiden Spiele auseinander.
   Bitte dann Bescheid geben.
