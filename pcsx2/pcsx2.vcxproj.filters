@@ -1139,6 +1139,9 @@
     <ClCompile Include="Rollback\Rollback.cpp">
       <Filter>Tools\Input Recording</Filter>
     </ClCompile>
+    <ClCompile Include="Rollback\BootShortcut.cpp">
+      <Filter>Tools\Input Recording</Filter>
+    </ClCompile>
     <ClCompile Include="Rollback\RunAhead.cpp">
       <Filter>Tools\Input Recording</Filter>
     </ClCompile>
@@ -2104,6 +2107,9 @@
       <Filter>Tools\Input Recording</Filter>
     </ClInclude>
     <ClInclude Include="Rollback\Rollback.h">
+      <Filter>Tools\Input Recording</Filter>
+    </ClInclude>
+    <ClInclude Include="Rollback\BootShortcut.h">
       <Filter>Tools\Input Recording</Filter>
     </ClInclude>
     <ClInclude Include="Rollback\RunAhead.h">

@@ -44,11 +44,12 @@ Host (Spieler 1):
 Join (Spieler 2):
     "Join.bat" starten und die IP-Adresse des Hosts eingeben.
 
-Beide Spiele starten an derselben Stelle (Startdatei "start.p2s") und warten,
-bis die Verbindung steht. So lange bleibt das Bild schwarz bzw. stehen, oben
-links zaehlt "Netplay: waiting for player 2 ..." die Sekunden hoch. Das ist
-normal. Sobald beide verbunden sind, erscheint "Netplay: connected" und das
-Spiel laeuft los.
+Jedes Spiel startet automatisch im Schnelldurchlauf bis zur
+Charakterauswahl von "Vs. 2P", mit allen Charakteren freigeschaltet (dauert
+ein paar Sekunden, ohne Ton). Dann wartet es, bis die Verbindung steht. So
+lange bleibt das Bild stehen, oben links zaehlt "Netplay: waiting for
+player 2 ..." die Sekunden hoch. Das ist normal. Sobald beide verbunden
+sind, erscheint "Netplay: connected" und das Spiel laeuft los.
 Jeder spielt mit seinem Controller an Port 1, das Spiel ordnet ihn
 automatisch dem richtigen Spieler zu.
 
@@ -58,9 +59,12 @@ Beenden: einfach das Spielfenster schliessen.
 3. Gut zu wissen
 ----------------
 
-- Die Startskripte pruefen, ob dein BIOS dieselbe Version wie beim
-  Organisator ist. Ein anderes BIOS kann funktionieren, kann aber zu Desyncs
-  fuehren. Beim Spiel-Abbild wird nichts geprueft.
+- Beide Spieler starten das Spiel aus ihrer eigenen Kopie, es wird kein
+  Spielstand verschickt. Dafuer muessen BIOS-Version und Spiel bei beiden
+  gleich sein. Die Startskripte warnen, wenn dein BIOS eine andere Version
+  als beim Organisator ist. Unterscheidet sich das Spiel trotzdem, erscheint
+  kurz nach dem Verbinden "the game differs between the players from the
+  start". Dann bitte dieselbe BIOS-Version benutzen.
 - Memory Cards sind waehrend des Online-Spiels abgeschaltet. Das ist Absicht.
 - "Run-Ahead" ist eingeschaltet: Das Spiel reagiert dadurch etwa einen Frame
   schneller auf Tasten. Ist der PC dafuer zu langsam, schaltet es sich selbst
@@ -71,7 +75,18 @@ Beenden: einfach das Spielfenster schliessen.
   (Delay 1, Rollback 2). Bitte nur in Absprache aendern.
 
 
-4. Nach dem Test
+4. Sicherheit
+-------------
+
+- Das Programm laedt nichts aus dem Internet nach, startet keine anderen
+  Programme und aendert nichts an Windows (keine Registry, kein Autostart).
+- Ueber das Netz kommen nur Controller-Eingaben des Gegners an (welche
+  Tasten gedrueckt sind), und nur waehrend einer Sitzung.
+- Das Paket nur vom Organisator annehmen. Zum Pruefen gibt es eine
+  SHA-256-Pruefsumme (Datei ".sha256.txt" neben dem Zip).
+
+
+5. Nach dem Test
 ----------------
 
 Bitte die Datei "logs\emulog.txt" an den Organisator schicken. Sie enthaelt

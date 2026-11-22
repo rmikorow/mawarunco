@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "Rollback/Netplay.h"
+#include "Rollback/BootShortcut.h"
 #include "Rollback/Rollback.h"
 #include "Rollback/RunAhead.h"
 
@@ -230,6 +231,12 @@ bool Netplay::SetLaunchOptions(std::string_view spec, Error* error)
 			if (!v)
 				return false;
 			opts.test_input = (*v != 0);
+		}
+		else if (key == "boot")
+		{
+			// Boot the game with the shortcut instead of loading a shared savestate ("boot" = built-in script).
+			if (!BootShortcut::Request(value.empty() ? std::string_view("vs2p") : value, error))
+				return false;
 		}
 		else if (key == "dump")
 		{
@@ -714,8 +721,14 @@ void Netplay::HandleEvents()
 			case GGRS_EVENT_DESYNC_DETECTED:
 				Console.Error(fmt::format("Netplay: DESYNC at frame {} (local {:016x}{:016x}, remote {:016x}{:016x})", e.a,
 					e.local_checksum_hi, e.local_checksum_lo, e.remote_checksum_hi, e.remote_checksum_lo));
+				// At the first comparison the peers never ran apart: they started from different states.
+				// With the boot shortcut that means a different BIOS, disc image or settings.
 				Host::AddIconOSDMessage(OSD_KEY, ICON_FA_TRIANGLE_EXCLAMATION,
-					fmt::format("Netplay: desync detected at frame {}", e.a), Host::OSD_ERROR_DURATION);
+					(e.a <= static_cast<s64>(s_options.desync_interval)) ?
+						std::string("Netplay: the game differs between the players from the start. Both need the "
+									"same BIOS version, game image and settings.") :
+						fmt::format("Netplay: desync detected at frame {}", e.a),
+					Host::OSD_ERROR_DURATION);
 				break;
 			case GGRS_EVENT_DISCONNECTED:
 				Fail("the remote peer disconnected");

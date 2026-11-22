@@ -33,6 +33,7 @@
 #include "Recording/InputRecordingControls.h"
 #include "Rollback/Rollback.h"
 #include "Rollback/LatencyTest.h"
+#include "Rollback/BootShortcut.h"
 #include "Rollback/Netplay.h"
 #include "Rollback/RunAhead.h"
 #include "Rollback/RollbackTest.h"
@@ -1475,8 +1476,10 @@ VMBootResult VMManager::Initialize(const VMBootParameters& boot_params, Error* e
 
 	// Read fast boot setting late so it can be overridden per-game.
 	// ELFs must be fast booted, and GS dumps are never fast booted.
+	// Rollback fork: the boot shortcut script assumes fast boot.
 	s_fast_boot_requested =
-		(boot_params.fast_boot.value_or(static_cast<bool>(EmuConfig.EnableFastBoot)) || !s_elf_override.empty()) &&
+		(boot_params.fast_boot.value_or(static_cast<bool>(EmuConfig.EnableFastBoot)) || !s_elf_override.empty() ||
+			BootShortcut::IsActive()) &&
 		(CDVDsys_GetSourceType() != CDVD_SourceType::NoDisc || !s_elf_override.empty()) &&
 		!GSDumpReplayer::IsReplayingDump();
 
@@ -1685,6 +1688,7 @@ void VMManager::Shutdown(bool save_resume_state)
 	RollbackTest::Abort();
 	LatencyTest::Abort();
 	RunAhead::Abort();
+	BootShortcut::Abort();
 	Netplay::Stop();
 
 	SaveSessionTime(s_disc_serial);
@@ -1821,6 +1825,7 @@ void VMManager::Reset()
 	RollbackTest::Abort();
 	LatencyTest::Abort();
 	RunAhead::Abort();
+	BootShortcut::Abort();
 	Netplay::Stop();
 
 	ResetFrameLimiter();
@@ -1921,6 +1926,7 @@ bool VMManager::DoLoadState(const char* filename, Error* error)
 	RollbackTest::Abort();
 	LatencyTest::Abort();
 	RunAhead::Abort();
+	BootShortcut::Abort();
 	Netplay::Stop();
 
 	if (!SaveState_UnzipFromDisk(filename, error))
@@ -2286,6 +2292,11 @@ float VMManager::GetFrameRate()
 void VMManager::ResetFrameLimiter()
 {
 	s_limiter_frame_start = GetCPUTicks();
+}
+
+void VMManager::Internal::ResetFrameLimiter()
+{
+	VMManager::ResetFrameLimiter();
 }
 
 void VMManager::Internal::DelayFrameLimiter(double ms)
@@ -3023,7 +3034,9 @@ void VMManager::Internal::PollInputOnCPUThread()
 
 	// Rollback self-test: snapshots, restores and input replay happen here, at a fixed point of the vsync.
 	// Rollback: netplay owns the frame boundary while active, the self-test only runs without it.
-	if (Netplay::IsActive())
+	if (BootShortcut::IsRunning())
+		BootShortcut::OnInputPolled();
+	else if (Netplay::IsActive())
 		Netplay::OnInputPolled();
 	else if (LatencyTest::IsActive())
 		LatencyTest::OnInputPolled();

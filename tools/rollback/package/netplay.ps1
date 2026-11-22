@@ -1,6 +1,8 @@
 # Fate/unlimited codes rollback netplay launcher (PCSX2 rollback fork).
 # Started by Host.bat / Join.bat. Finds the BIOS and the disc image, checks them against the reference
-# hashes, writes the BIOS into the settings and starts PCSX2 with the netplay session.
+# hashes, writes the BIOS into the settings and starts PCSX2 with the netplay session. The game boots
+# from the player's own disc image straight to the "Vs. 2P" character select (boot shortcut); there is no
+# shared savestate.
 param(
     [Parameter(Mandatory = $true)][ValidateSet('host', 'join', 'setup')][string]$Mode,
     [string]$HostAddress = '',   # join: host address instead of asking
@@ -21,7 +23,6 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $exe = Join-Path $root 'pcsx2-qtx64-clang.exe'
 $ini = Join-Path $root 'inis\PCSX2.ini'
-$state = Join-Path $root 'start.p2s'
 
 function Stop-WithMessage([string]$text) {
     Write-Host ''
@@ -96,27 +97,25 @@ if (-not $iso) {
 }
 Write-Host "Spiel: $($iso.Name)"
 
-if (-not (Test-Path $state)) {
-    Stop-WithMessage 'Die Startdatei "start.p2s" fehlt. Sie muss im selben Ordner wie diese Datei liegen.'
-}
-
 # ---- Session ----------------------------------------------------------------------------------------
 if ($Mode -eq 'host') {
-    $spec = "host=$Port,delay=$Delay,rollback=$Rollback"
+    $spec = "host=$Port,delay=$Delay,rollback=$Rollback,boot"
     Write-Host ''
     Write-Host "Du bist Host (Spieler 1). Warte auf UDP-Port $Port auf den anderen Spieler."
     Write-Host 'Der andere Spieler braucht deine oeffentliche IP-Adresse.'
-    Write-Host 'Bis er verbunden ist, bleibt das Spielbild stehen (schwarz). Das ist normal.'
+    Write-Host 'Das Spiel startet bis zur Charakterauswahl und wartet dort, bis er verbunden ist. Das ist normal.'
 }
 else {
     $hostAddr = $HostAddress
     if (-not $hostAddr) { $hostAddr = (Read-Host 'IP-Adresse des Hosts (z. B. 203.0.113.5)').Trim() }
     if (-not $hostAddr) { Stop-WithMessage 'Keine Adresse eingegeben.' }
+    # Only an IP address (IPv4 or [IPv6]) with an optional port; nothing else reaches the emulator.
+    if ($hostAddr -notmatch '^[0-9A-Fa-f.:\[\]]+$') { Stop-WithMessage "Ungueltige Adresse: $hostAddr (bitte nur die IP-Adresse eingeben)" }
     if ($hostAddr -notmatch ':\d+$') { $hostAddr = "${hostAddr}:$Port" }
-    $spec = "join=$hostAddr,delay=$Delay,rollback=$Rollback"
+    $spec = "join=$hostAddr,delay=$Delay,rollback=$Rollback,boot"
     Write-Host ''
     Write-Host "Du bist Spieler 2. Verbinde mit $hostAddr ..."
 }
 
 Write-Host 'PCSX2 startet. Zum Beenden einfach das Spielfenster schliessen.'
-& $exe -batch -netplay $spec -statefile $state -- $iso.FullName | Out-Null
+& $exe -batch -netplay $spec -- $iso.FullName | Out-Null

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "Rollback/RunAhead.h"
+#include "Rollback/BootShortcut.h"
 #include "Rollback/LatencyTest.h"
 #include "Rollback/Netplay.h"
 #include "Rollback/Rollback.h"
@@ -124,7 +125,8 @@ bool RunAhead::IsActive()
 {
 	Init();
 	// Netplay drives run-ahead itself; the self-test and the latency measurement need plain frames.
-	return s_frames > 0 && !Netplay::IsActive() && !RollbackTest::IsBusy() && !LatencyTest::IsActive();
+	return s_frames > 0 && !Netplay::IsActive() && !BootShortcut::IsActive() && !RollbackTest::IsBusy() &&
+		   !LatencyTest::IsActive();
 }
 
 void RunAhead::OnInputPolled()

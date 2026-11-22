@@ -1,14 +1,14 @@
 # Builds the netplay test package from the fork's Release build.
 #
-#   .\tools\rollback\make-netplay-package.ps1 -ReferenceBios <bios .bin> -StateFile <start state .p2s>
+#   .\tools\rollback\make-netplay-package.ps1 -ReferenceBios <bios .bin>
 #
 # Output: dist\FUC-Netplay-<date>.zip, built in dist\.staging\ (private to this script, deleted and
 # recreated on every run; to test the package, unzip it somewhere else). The package contains the emulator, sanitized
 # settings, the launcher, the tester guide, licenses and the fork's source patch. It never contains a
 # BIOS or a disc image; the reference BIOS is only used to compute a SHA-256 hash for the launcher.
-# The disc image is not checked: any dump of the game is accepted.
+# The disc image is not checked: any dump of the game is accepted. There is no start savestate: both
+# players boot their own copy with the boot shortcut straight to the "Vs. 2P" character select.
 param(
-    [string]$StateFile = '',
     # BIOS the launcher compares against (only its SHA-256 and file name go into the package).
     [Parameter(Mandatory = $true)][string]$ReferenceBios,
     # Microsoft.VC143.CRT folder; found through vswhere when empty.
@@ -116,14 +116,6 @@ foreach ($f in 'Host.bat', 'Join.bat', 'Einstellungen.bat', 'LIESMICH.txt') {
     Get-Content (Join-Path $template $f) | Set-Content (Join-Path $out $f) -Encoding ascii
 }
 
-# ---- Start state --------------------------------------------------------------------------------------
-if ($StateFile) {
-    Copy-Item $StateFile -Destination (Join-Path $out 'start.p2s')
-}
-else {
-    Write-Warning 'No -StateFile given: the package has no start.p2s yet.'
-}
-
 # ---- Licenses and source (GPL: the changes to PCSX2 v2.8.2 as a patch) -------------------------------
 $ggrs = Get-ChildItem (Join-Path $CargoHome 'registry\src') -Directory -Recurse -Filter 'ggrs-0.13.0' | Select-Object -First 1
 if (-not $ggrs) { Write-Warning "GGRS sources not found under $CargoHome (license files missing)." }
@@ -152,4 +144,8 @@ $zip = Join-Path $dist ("FUC-Netplay-{0}.zip" -f (Get-Date -Format 'yyyyMMdd'))
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path (Join-Path $out '*') -DestinationPath $zip -CompressionLevel Optimal
 $size = (Get-Item $zip).Length / 1MB
+# SHA-256 next to the zip, so players can check that their copy is the one the organizer built.
+$hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+"$hash  $(Split-Path $zip -Leaf)" | Set-Content "$zip.sha256.txt" -Encoding ascii
 Write-Host ("Package: {0} ({1:N0} MB)" -f $zip, $size)
+Write-Host "SHA-256: $hash"

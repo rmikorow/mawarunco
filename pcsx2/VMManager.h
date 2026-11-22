@@ -336,6 +336,9 @@ namespace VMManager
 
 		/// Rollback fork: moves the frame limiter's schedule later by the given time (netplay time sync).
 		void DelayFrameLimiter(double ms);
+
+		/// Rollback fork: restarts the frame limiter schedule from now (after frames ran unthrottled).
+		void ResetFrameLimiter();
 	} // namespace Internal
 } // namespace VMManager
 

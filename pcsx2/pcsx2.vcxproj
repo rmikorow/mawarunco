@@ -293,6 +293,7 @@
     <ClCompile Include="Rollback\LatencyTest.cpp" />
     <ClCompile Include="Rollback\Netplay.cpp" />
     <ClCompile Include="Rollback\Rollback.cpp" />
+    <ClCompile Include="Rollback\BootShortcut.cpp" />
     <ClCompile Include="Rollback\RunAhead.cpp" />
     <ClCompile Include="Rollback\RollbackTest.cpp" />
     <ClCompile Include="Recording\Utilities\InputRecordingLogger.cpp" />
@@ -745,6 +746,7 @@
     <ClInclude Include="Rollback\LatencyTest.h" />
     <ClInclude Include="Rollback\Netplay.h" />
     <ClInclude Include="Rollback\Rollback.h" />
+    <ClInclude Include="Rollback\BootShortcut.h" />
     <ClInclude Include="Rollback\RunAhead.h" />
     <ClInclude Include="Rollback\RollbackTest.h" />
     <ClInclude Include="Recording\Utilities\InputRecordingLogger.h" />

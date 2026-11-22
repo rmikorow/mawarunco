@@ -23,23 +23,37 @@ All changes are on the `rollback` branch.
   - Selectable input delay and rollback depth.
   - Desync detection with checksums over the gameplay state.
   - Time synchronization between the peers.
+- **Boot shortcut** (`pcsx2/Rollback/BootShortcut.*`): boots the game from
+  power-on with a scripted input sequence, fast and without user input,
+  straight to the "Vs. 2P" character select with all characters unlocked.
+  Each player boots their own copy; no savestate is exchanged. Emulation is
+  deterministic, so both arrive at the same state.
+- **Run-ahead** (`pcsx2/Rollback/RunAhead.*`): one frame, offline and in
+  netplay, hides the game's internal input lag.
 - **Self-test and benchmark** (`pcsx2/Rollback/RollbackTest.*`) for
   determinism.
+- The PCSX2 auto updater is disabled: it would replace this build with an
+  official release.
 
 ## Playing
 
 Both players need their own BIOS and their own copy of the game. Neither is
-part of this repository. Both start the same savestate with identical
-settings:
+part of this repository. Both need the same BIOS version, the same game and
+identical settings:
 
 ```
-pcsx2-qtx64-clang.exe -batch -netplay "host=7000,delay=1,rollback=2" -statefile start.p2s -- game.iso
-pcsx2-qtx64-clang.exe -batch -netplay "join=<host ip>:7000,delay=1,rollback=2" -statefile start.p2s -- game.iso
+pcsx2-qtx64-clang.exe -batch -netplay "host=7000,delay=1,rollback=2,boot" -- game.iso
+pcsx2-qtx64-clang.exe -batch -netplay "join=<host ip>:7000,delay=1,rollback=2,boot" -- game.iso
 ```
+
+The session starts once both have finished the boot shortcut. If the two
+states differ (different BIOS or game), desync detection reports it at the
+first check.
 
 Both controller ports must be set to DualShock 2. Memory cards are off during
-netplay. `tools/rollback/make-netplay-package.ps1` builds a ready-to-use
-package with launcher scripts.
+netplay, and the clock and NVRAM use fixed defaults.
+`tools/rollback/make-netplay-package.ps1` builds a ready-to-use package with
+launcher scripts.
 
 ## Building (Windows)
 

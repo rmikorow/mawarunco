@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "Rollback/BootShortcut.h"
 #include "Rollback/Netplay.h"
 #include "CDVD/CDVD.h"
 #include "CDVD/Ps1CD.h"
@@ -980,7 +981,10 @@ void cdvdReset()
 
 	// CDVD internally uses GMT+9, 1-indexed months, and year offset of 2000 instead of 1900.
 	// tm struct uses 0-indexed months and year offset of 1900.
-	if (EmuConfig.ManuallySetRealTimeClock)
+	// Rollback fork: netplay and the boot shortcut need the same clock on both peers (the game may seed
+	// its RNG from it), so they use the fixed input recording time, even over a manually set clock.
+	const bool fixed_clock = Netplay::IsActive() || BootShortcut::IsActive();
+	if (EmuConfig.ManuallySetRealTimeClock && !fixed_clock)
 	{
 		resulting_tm.tm_sec = EmuConfig.RtcSecond;
 		resulting_tm.tm_min = EmuConfig.RtcMinute;
@@ -999,7 +1003,7 @@ void cdvdReset()
 		gmtime_r(&input_time, &input_tm);
 #endif
 	}
-	else if (g_InputRecording.isActive())
+	else if (g_InputRecording.isActive() || fixed_clock)
 	{
 		// Default input recording value (2020-03-04 00:00:00) if manual RTC is off. Well beyond any PS2 game's release date.
 		// Some games require a valid date in terms of when the PS2 / game actually came out (see: MGS3).
