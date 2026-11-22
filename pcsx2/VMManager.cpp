@@ -3027,10 +3027,12 @@ void VMManager::Internal::PollInputOnCPUThread()
 		Netplay::OnInputPolled();
 	else if (LatencyTest::IsActive())
 		LatencyTest::OnInputPolled();
-	else if (RunAhead::IsActive())
-		RunAhead::OnInputPolled();
 	else
+	{
 		RollbackTest::OnInputPolled();
+		if (RunAhead::IsActive())
+			RunAhead::OnInputPolled();
+	}
 }
 
 void VMManager::CheckForCPUConfigChanges(const Pcsx2Config& old_config)

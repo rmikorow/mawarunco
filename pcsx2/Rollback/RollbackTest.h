@@ -50,6 +50,10 @@ namespace RollbackTest
 	/// Cancels a running test (state load, reset, shutdown).
 	void Abort();
 
+	/// True while a test runs, is requested, or an unattended series still has runs left. Run-ahead stands
+	/// down meanwhile.
+	bool IsBusy();
+
 	/// Diagnostics: timer reads are traced while this is set (first frames of both passes).
 	extern bool g_trace_timers;
 	/// unit 0 = EE, 1 = IOP. pc is the last written PC (usually the block start in the recompilers).

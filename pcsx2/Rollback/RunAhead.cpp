@@ -5,6 +5,7 @@
 #include "Rollback/LatencyTest.h"
 #include "Rollback/Netplay.h"
 #include "Rollback/Rollback.h"
+#include "Rollback/RollbackTest.h"
 
 #include "Host.h"
 #include "IconsFontAwesome.h"
@@ -49,7 +50,8 @@ namespace RunAhead
 		if (s_init)
 			return;
 		s_init = true;
-		s_frames = static_cast<u32>(std::clamp(Host::GetBaseIntSettingValue("EmuCore/Rollback", "RunAhead", 0), 0, 2));
+		// On by default in this fork (one frame hides Fate's internal frame of lag, ~10 ms).
+		s_frames = static_cast<u32>(std::clamp(Host::GetBaseIntSettingValue("EmuCore/Rollback", "RunAhead", 1), 0, 2));
 		if (s_frames > 0)
 			Console.WriteLn(fmt::format("Run-ahead: {} frame(s)", s_frames));
 	}
@@ -121,7 +123,8 @@ void RunAhead::EndCycle()
 bool RunAhead::IsActive()
 {
 	Init();
-	return s_frames > 0 && !Netplay::IsActive();
+	// Netplay drives run-ahead itself; the self-test and the latency measurement need plain frames.
+	return s_frames > 0 && !Netplay::IsActive() && !RollbackTest::IsBusy() && !LatencyTest::IsActive();
 }
 
 void RunAhead::OnInputPolled()
@@ -134,11 +137,11 @@ void RunAhead::OnInputPolled()
 
 void RunAhead::OnExecutionExited()
 {
-	if (!std::exchange(s_exit_pending, false))
-		return;
+	const bool pending = std::exchange(s_exit_pending, false);
 	if (!IsActive())
 	{
-		// Switched off (budget) while a cycle was running: finish it cleanly.
+		// Switched off (budget) or standing down (self-test) while a cycle was running: finish it cleanly,
+		// so whoever takes over sees the real state.
 		if (s_state == State::Spec)
 		{
 			Error error;
@@ -152,6 +155,8 @@ void RunAhead::OnExecutionExited()
 		}
 		return;
 	}
+	if (!pending)
+		return;
 
 	Error error;
 	switch (s_state)

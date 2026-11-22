@@ -10,7 +10,7 @@
 // (audio off), and the snapshot is restored. Afterwards the frame limiter sleeps and the host input is
 // polled again, as late as possible before the next real frame reads it.
 //
-// [EmuCore/Rollback] RunAhead = 0 (off), 1 or 2 frames. Offline this module drives itself; during
+// [EmuCore/Rollback] RunAhead = 0 (off), 1 (default) or 2 frames. Offline this module drives itself; during
 // netplay the netplay session uses the helpers below (and skips run-ahead in frames with a rollback).
 // If the work no longer fits into a frame for a while, run-ahead switches itself off.
 namespace RunAhead

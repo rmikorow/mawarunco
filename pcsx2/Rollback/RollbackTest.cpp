@@ -302,6 +302,11 @@ void RollbackTest::Request(u32 frames, const Variant& variant)
 	s_variant = variant;
 }
 
+bool RollbackTest::IsBusy()
+{
+	return s_phase != Phase::Idle || s_requested_frames != 0 || (s_auto_active && s_auto_runs_left > 0);
+}
+
 void RollbackTest::Abort()
 {
 	if (s_phase == Phase::Idle && s_requested_frames == 0)
