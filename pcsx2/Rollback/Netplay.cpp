@@ -74,6 +74,8 @@ namespace Netplay
 	static int s_req_index = 0;
 	static bool s_was_running = false;
 	static int s_advance_frame = -1; // frame the next advance emulates (from the save before it)
+	static int s_first_desync_frame = -1; // first frame GGRS reported as desynced, -1 = none
+	static u32 s_desync_reports = 0;      // further reports after the first
 	static int s_timesync_frame = -1; // frame for which the time sync wait was applied
 	static Common::Timer s_wait_timer; // since the session started (shown while waiting for the peer)
 	static u32 s_wait_shown_seconds = ~0u;
@@ -346,6 +348,8 @@ bool Netplay::Start(const Options& opts, Error* error)
 	s_wait_timer.Reset();
 	s_wait_shown_seconds = ~0u;
 	s_stats = {};
+	s_first_desync_frame = -1;
+	s_desync_reports = 0;
 
 	if (opts.synctest)
 	{
@@ -754,15 +758,27 @@ void Netplay::HandleEvents()
 			case GGRS_EVENT_DESYNC_DETECTED:
 				Console.Error(fmt::format("Netplay: DESYNC at frame {} (local {:016x}{:016x}, remote {:016x}{:016x})", e.a,
 					e.local_checksum_hi, e.local_checksum_lo, e.remote_checksum_hi, e.remote_checksum_lo));
-				LogDesyncMap(static_cast<int>(e.a));
-				// At the first comparison the peers never ran apart: they started from different states.
-				// With the boot shortcut that means a different BIOS, disc image or settings.
-				Host::AddIconOSDMessage(OSD_KEY, ICON_FA_TRIANGLE_EXCLAMATION,
-					(e.a <= static_cast<s64>(s_options.desync_interval)) ?
-						std::string("Netplay: the game differs between the players from the start. Both need the "
-									"same BIOS version, game image and settings.") :
-						fmt::format("Netplay: desync detected at frame {}", e.a),
-					Host::OSD_ERROR_DURATION);
+				// The first one tells where it started; after that every check reports again, so later
+				// ones only go to the log (the diagnostics map only for the first few).
+				if (s_first_desync_frame < 0)
+				{
+					s_first_desync_frame = static_cast<int>(e.a);
+					LogDesyncMap(s_first_desync_frame);
+					// At the first comparison the peers never ran apart: they started from different states.
+					// With the boot shortcut that means a different BIOS, disc image or settings.
+					const bool from_start = (e.a <= static_cast<s64>(s_options.desync_interval));
+					const std::string text =
+						from_start ? std::string("Netplay: the game differs between the players from the start. Both "
+												 "need the same BIOS version, game image and settings.") :
+									 fmt::format("Netplay: desync detected at frame {}", e.a);
+					Console.Error(fmt::format("Netplay: FIRST DESYNC at frame {}{}", e.a, from_start ? " (from the start)" : ""));
+					// Stays on screen for the rest of the session.
+					Host::AddIconOSDMessage(OSD_KEY, ICON_FA_TRIANGLE_EXCLAMATION, text, 24.0f * 3600.0f);
+				}
+				else if (++s_desync_reports <= 3)
+				{
+					LogDesyncMap(static_cast<int>(e.a));
+				}
 				break;
 			case GGRS_EVENT_DISCONNECTED:
 				Fail("the remote peer disconnected");
