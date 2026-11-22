@@ -1,6 +1,6 @@
 # Builds the netplay test package from the fork's Release build.
 #
-#   .\tools\rollback\make-netplay-package.ps1 -StateFile <start state .p2s> [-ReferenceBios <bin>]
+#   .\tools\rollback\make-netplay-package.ps1 -ReferenceBios <bios .bin> -StateFile <start state .p2s>
 #
 # Output: dist\FUC-Netplay-<date>.zip, built in dist\.staging\ (private to this script, deleted and
 # recreated on every run; to test the package, unzip it somewhere else). The package contains the emulator, sanitized
@@ -9,13 +9,35 @@
 # The disc image is not checked: any dump of the game is accepted.
 param(
     [string]$StateFile = '',
-    [string]$ReferenceBios = '<path to your BIOS file>',
-    [string]$VcRedistDir = 'F:\VisualStudio\2022\Community\VC\Redist\MSVC\14.44.35112\x64\Microsoft.VC143.CRT',
-    [string]$RustDir = '<Rust toolchain folder>'
+    # BIOS the launcher compares against (only its SHA-256 and file name go into the package).
+    [Parameter(Mandatory = $true)][string]$ReferenceBios,
+    # Microsoft.VC143.CRT folder; found through vswhere when empty.
+    [string]$VcRedistDir = '',
+    # Folder of the cargo home (for the GGRS license files); derived when empty.
+    [string]$CargoHome = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+
+if (-not $VcRedistDir) {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    $vs = & $vswhere -latest -property installationPath
+    $VcRedistDir = Get-ChildItem (Join-Path $vs 'VC\Redist\MSVC') -Directory |
+        Where-Object { Test-Path (Join-Path $_.FullName 'x64\Microsoft.VC143.CRT') } |
+        Sort-Object Name -Descending | Select-Object -First 1 |
+        ForEach-Object { Join-Path $_.FullName 'x64\Microsoft.VC143.CRT' }
+    if (-not $VcRedistDir) { throw 'Visual C++ runtime not found, pass -VcRedistDir.' }
+}
+if (-not $CargoHome) {
+    # Same lookup as the build: RollbackRustDir from the local props file, then CARGO_HOME, then ~\.cargo.
+    $localProps = Join-Path $repo '3rdparty\ggrs-capi\ggrs-capi.local.props'
+    if ((Test-Path $localProps) -and ((Get-Content $localProps -Raw) -match '<RollbackRustDir[^>]*>([^<]+)<')) {
+        $CargoHome = Join-Path $Matches[1] 'cargo'
+    }
+    elseif ($env:CARGO_HOME) { $CargoHome = $env:CARGO_HOME }
+    else { $CargoHome = Join-Path $env:USERPROFILE '.cargo' }
+}
 $bin = Join-Path $repo 'bin'
 $dist = Join-Path $repo 'dist'
 # Only this staging folder is ever deleted. Never point it at a folder someone uses (it may hold their
@@ -98,7 +120,8 @@ else {
 }
 
 # ---- Licenses and source (GPL: the changes to PCSX2 v2.8.2 as a patch) -------------------------------
-$ggrs = Get-ChildItem (Join-Path $RustDir 'cargo\registry\src') -Directory -Recurse -Filter 'ggrs-0.13.0' | Select-Object -First 1
+$ggrs = Get-ChildItem (Join-Path $CargoHome 'registry\src') -Directory -Recurse -Filter 'ggrs-0.13.0' | Select-Object -First 1
+if (-not $ggrs) { Write-Warning "GGRS sources not found under $CargoHome (license files missing)." }
 if ($ggrs) {
     New-Item -ItemType Directory -Force (Join-Path $out 'docs\ggrs') | Out-Null
     Get-ChildItem $ggrs.FullName -File -Filter 'LICENSE*' | Copy-Item -Destination (Join-Path $out 'docs\ggrs')
