@@ -516,7 +516,7 @@ static void DCFilter(float *input)
 __forceinline void spu2Output(StereoOut32 out)
 {
 	// Rollback fork: the audio of resimulated frames has already been played (as predicted), drop it.
-	if (Rollback::g_resimulating)
+	if (Rollback::SkipAudio())
 		return;
 
 	float conv[2];

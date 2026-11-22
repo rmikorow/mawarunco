@@ -106,6 +106,7 @@ namespace LatencyTest
 	static u32 s_presented = 0; // GS thread
 	static std::array<std::atomic<u64>, RING> s_poll_time = {};
 	static u64 s_last_present = 0;
+	static std::atomic<u64> s_runahead_poll{0}; // last run-ahead input poll (0 = run-ahead not used)
 	struct HostStats
 	{
 		u32 samples = 0;
@@ -152,13 +153,51 @@ void LatencyTest::OnInputPolledHost()
 	s_poll_time[n % RING].store(GetCPUTicks(), std::memory_order_release);
 }
 
-void LatencyTest::OnVsyncPresented()
+void LatencyTest::OnRunAheadInputPolled()
+{
+	if (s_stats)
+		s_runahead_poll.store(GetCPUTicks(), std::memory_order_release);
+}
+
+void LatencyTest::OnVsyncPresented(bool skipped)
 {
 	if (!s_stats)
 		return;
 	const u64 now = GetCPUTicks();
 	const double tick_ms = 1000.0 / static_cast<double>(GetTickFrequency());
 	const u32 j = ++s_presented; // packets are processed in posting order, 1-based like s_posted
+
+	// Run-ahead: the presented (speculative) frame already shows the reaction to the last input poll.
+	const u64 ra_poll = s_runahead_poll.load(std::memory_order_acquire);
+	if (ra_poll != 0)
+	{
+		if (skipped)
+			return;
+		if (s_last_present != 0)
+		{
+			const double interval = static_cast<double>(now - s_last_present) * tick_ms;
+			const double dev = std::abs(interval - 1000.0 / 59.94);
+			s_host.interval_dev_sum += dev;
+			s_host.interval_max = std::max(s_host.interval_max, dev);
+		}
+		s_last_present = now;
+		if (now > ra_poll)
+		{
+			const double ms = static_cast<double>(now - ra_poll) * tick_ms;
+			s_host.samples++;
+			s_host.sum_ms += ms;
+			s_host.max_ms = std::max(s_host.max_ms, ms);
+		}
+		if (s_host.samples >= 600)
+		{
+			Console.WriteLn(fmt::format("LATENCY STATS: input poll -> reaction frame handed to the GPU: avg {:.1f} ms, max "
+										"{:.1f} ms; frame pacing: avg deviation {:.2f} ms, max {:.2f} ms (run-ahead)",
+				s_host.sum_ms / s_host.samples, s_host.max_ms, s_host.interval_dev_sum / s_host.samples,
+				s_host.interval_max));
+			s_host = {};
+		}
+		return;
+	}
 	if (s_last_present != 0)
 	{
 		const double interval = static_cast<double>(now - s_last_present) * tick_ms;

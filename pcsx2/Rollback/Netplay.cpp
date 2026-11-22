@@ -3,6 +3,7 @@
 
 #include "Rollback/Netplay.h"
 #include "Rollback/Rollback.h"
+#include "Rollback/RunAhead.h"
 
 #include "Config.h"
 #include "Host.h"
@@ -85,6 +86,26 @@ namespace Netplay
 	};
 	static Stats s_stats;
 	static u32 s_rollback_depth = 0; // advances since the last load in the current request list
+
+	// Run-ahead during netplay (see RunAhead.h): after the real frame of a request list, snapshot, show
+	// speculative frames with the latest local input and the predicted remote input, restore. Skipped
+	// in frames with a rollback (the rollback has priority for the time budget).
+	enum class RunAheadState
+	{
+		Off,
+		Real, // the real frame of this list runs with run-ahead flags
+		Spec, // speculative frames run
+	};
+	static RunAheadState s_ra_state = RunAheadState::Off;
+	static u32 s_ra_index = 0;
+	static bool s_list_had_load = false;
+	static Rollback::PadInput s_last_local_input = {};
+	// Run-ahead saves the state after the real frame straight into the ring slot of the next frame. GGRS
+	// asks to save exactly that state at the start of the next request list, so that save is skipped.
+	static size_t s_ra_slot = 0;
+	static int s_ra_presaved_frame = -1;
+	static bool StartRunAhead();
+	static void ContinueRunAhead();
 
 	static bool Start(const Options& opts, Error* error);
 	static void LogStats();
@@ -330,6 +351,9 @@ void Netplay::Stop()
 	Rollback::EndInputInjection();
 	s_ring.clear();
 	s_exit_pending = false;
+	s_ra_state = RunAheadState::Off;
+	s_ra_presaved_frame = -1;
+	RunAhead::ClearFlags();
 }
 
 void Netplay::LogStats()
@@ -386,6 +410,13 @@ void Netplay::OnExecutionExited()
 
 	if (!s_session)
 		return;
+
+	// A speculative run-ahead frame finished: next one, or restore and end the cycle.
+	if (s_ra_state == RunAheadState::Spec)
+	{
+		ContinueRunAhead();
+		return;
+	}
 
 	// A frame just finished. Answer the rest of the current request list (saves, maybe the next advance).
 	s_stats.frames++;
@@ -487,6 +518,7 @@ bool Netplay::AdvanceSession()
 	else
 	{
 		const Rollback::PadInput input = LocalInput(LOCAL_CONTROLLER_PORT);
+		s_last_local_input = input;
 		if (ggrs_add_local_input(s_session, s_options.local_player, reinterpret_cast<const u8*>(&input)) < 0)
 		{
 			Fail(fmt::format("add_local_input failed: {}", LastGgrsError()));
@@ -516,6 +548,7 @@ bool Netplay::AdvanceSession()
 	s_req_index = 0;
 	s_need_advance = false;
 	s_rollback_depth = 0;
+	s_list_had_load = false;
 
 	// GGRS 0.13 does not report the prediction threshold as an error: it returns the requests without an
 	// advance (for example only a save). Answer them, but do not run a frame.
@@ -544,7 +577,9 @@ void Netplay::ProcessRequests()
 		{
 			const int frame = ggrs_request_frame(s_session, index);
 			const u32 slot = static_cast<u32>(frame) % static_cast<u32>(s_ring.size());
-			if (!Rollback::Save(*s_ring[slot], &error))
+			const bool presaved = (frame == s_ra_presaved_frame && !s_list_had_load);
+			s_ra_presaved_frame = -1;
+			if (!presaved && !Rollback::Save(*s_ring[slot], &error))
 			{
 				Fail(fmt::format("snapshot failed: {}", error.GetDescription()));
 				return;
@@ -568,6 +603,7 @@ void Netplay::ProcessRequests()
 			}
 			s_stats.rollbacks++;
 			s_rollback_depth = 0;
+			s_list_had_load = true;
 		}
 		else if (kind == GGRS_REQUEST_ADVANCE)
 		{
@@ -587,6 +623,16 @@ void Netplay::ProcessRequests()
 				s_rollback_depth++;
 				s_stats.max_rollback = std::max(s_stats.max_rollback, s_rollback_depth);
 			}
+			else if (!s_options.synctest && RunAhead::Frames() > 0 && !s_list_had_load)
+			{
+				// The real frame of this list, followed by run-ahead.
+				RunAhead::BeginRealFrame();
+				s_ra_state = RunAheadState::Real;
+			}
+			else
+			{
+				RunAhead::ClearFlags();
+			}
 
 			s_req_index++;
 			return; // let the CPU emulate this frame
@@ -601,6 +647,49 @@ void Netplay::ProcessRequests()
 	}
 
 	Rollback::g_resimulating = false;
+	if (s_ra_state == RunAheadState::Real && StartRunAhead())
+		return; // the CPU emulates the first speculative frame
+	s_need_advance = true;
+}
+
+bool Netplay::StartRunAhead()
+{
+	// After the advance, GGRS is at the next frame; its first request will be to save this state.
+	const int next_frame = ggrs_current_frame(s_session);
+	s_ra_slot = static_cast<size_t>(next_frame) % s_ring.size();
+	Error error;
+	if (!Rollback::Save(*s_ring[s_ra_slot], &error))
+	{
+		Console.Error(fmt::format("Netplay: run-ahead snapshot failed: {}", error.GetDescription()));
+		s_ra_state = RunAheadState::Off;
+		s_ra_presaved_frame = -1;
+		RunAhead::ClearFlags();
+		return false;
+	}
+	s_ra_presaved_frame = next_frame;
+	// Latest local input; the remote input stays at its last value (GGRS predicts "repeat last" too).
+	Rollback::SetInput(s_options.local_player, s_last_local_input);
+	s_ra_index = 1;
+	RunAhead::BeginSpeculativeFrame(s_ra_index);
+	s_ra_state = RunAheadState::Spec;
+	return true;
+}
+
+void Netplay::ContinueRunAhead()
+{
+	if (s_ra_index < RunAhead::Frames())
+	{
+		RunAhead::BeginSpeculativeFrame(++s_ra_index);
+		return;
+	}
+	Error error;
+	if (!Rollback::Load(*s_ring[s_ra_slot], &error))
+	{
+		Fail(fmt::format("run-ahead restore failed: {}", error.GetDescription()));
+		return;
+	}
+	s_ra_state = RunAheadState::Off;
+	RunAhead::EndCycle(); // limiter sleep and host input poll, then the next advance
 	s_need_advance = true;
 }
 

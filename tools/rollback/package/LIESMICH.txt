@@ -62,6 +62,9 @@ Beenden: einfach das Spielfenster schliessen.
   Organisator ist. Ein anderes BIOS kann funktionieren, kann aber zu Desyncs
   fuehren. Beim Spiel-Abbild wird nichts geprueft.
 - Memory Cards sind waehrend des Online-Spiels abgeschaltet. Das ist Absicht.
+- "Run-Ahead" ist eingeschaltet: Das Spiel reagiert dadurch etwa einen Frame
+  schneller auf Tasten. Ist der PC dafuer zu langsam, schaltet es sich selbst
+  ab (Meldung oben im Bild), das Spiel laeuft dann normal weiter.
 - Erscheint oben "desync detected", laufen die beiden Spiele auseinander.
   Bitte dann Bescheid geben.
 - Eingabeverzoegerung (Delay) und Rollback-Tiefe stehen oben in netplay.ps1

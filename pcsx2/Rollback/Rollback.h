@@ -91,4 +91,13 @@ namespace Rollback
 	/// True while frames are resimulated after a rollback. The frame limiter, GS presentation and audio
 	/// output are skipped meanwhile; emulation itself is unchanged. CPU thread only.
 	extern bool g_resimulating;
+
+	/// Finer control for run-ahead (each also implied by g_resimulating). CPU thread only.
+	extern bool g_skip_present;  ///< emulate the GS but do not present the frame
+	extern bool g_skip_audio;    ///< drop the audio output of the frame
+	extern bool g_skip_throttle; ///< do not sleep in the frame limiter at the end of the frame
+
+	inline bool SkipPresent() { return g_resimulating || g_skip_present; }
+	inline bool SkipAudio() { return g_resimulating || g_skip_audio; }
+	inline bool SkipThrottle() { return g_resimulating || g_skip_throttle; }
 } // namespace Rollback

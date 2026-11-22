@@ -39,6 +39,10 @@ namespace LatencyTest
 	/// CPU thread: host input was polled for the next frame.
 	void OnInputPolledHost();
 
-	/// GS thread: a vsync packet was processed (frame presented or skipped).
-	void OnVsyncPresented();
+	/// GS thread: a vsync packet was processed; skipped = not presented (run-ahead, resimulation).
+	void OnVsyncPresented(bool skipped);
+
+	/// CPU thread, run-ahead: host input was polled for the next cycle. With run-ahead the reaction to it
+	/// is presented in the same cycle (the speculative frame), so statistics switch to that.
+	void OnRunAheadInputPolled();
 } // namespace LatencyTest

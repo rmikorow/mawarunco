@@ -95,6 +95,9 @@ $settings = foreach ($l in Get-Content (Join-Path $bin 'inis\PCSX2.ini')) {
     if ($l -match '^\[(.+)\]$') { $section = $Matches[1] }
     $converted = Convert-SettingsLine $section $l
     if ($null -ne $converted) { $converted }
+    # Run-ahead (1 frame) is on in the package: ~10 ms less input latency, local only (cannot desync),
+    # switches itself off on a PC that is too slow.
+    if ($l -eq '[EmuCore/Rollback]') { 'RunAhead = 1' }
 }
 $settings | Set-Content (Join-Path $out 'inis\PCSX2.ini') -Encoding UTF8
 $check = Get-Content (Join-Path $out 'inis\PCSX2.ini') -Raw

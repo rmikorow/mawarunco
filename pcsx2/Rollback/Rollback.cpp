@@ -18,6 +18,9 @@
 #include <cstring>
 
 bool Rollback::g_resimulating = false;
+bool Rollback::g_skip_present = false;
+bool Rollback::g_skip_audio = false;
+bool Rollback::g_skip_throttle = false;
 
 static bool s_input_injection = false;
 

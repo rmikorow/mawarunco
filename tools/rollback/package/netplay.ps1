@@ -68,6 +68,15 @@ $out = foreach ($l in $lines) {
 if (-not $found) {
     $out = foreach ($l in $out) { $l; if ($l -eq '[Filenames]') { "BIOS = $($bios.Name)" } }
 }
+# Run-ahead (1 frame, faster reaction) unless the settings already say otherwise.
+if (-not ($out | Where-Object { $_ -match '^RunAhead = ' })) {
+    if ($out -contains '[EmuCore/Rollback]') {
+        $out = foreach ($l in $out) { $l; if ($l -eq '[EmuCore/Rollback]') { 'RunAhead = 1' } }
+    }
+    else {
+        $out = @($out) + @('', '[EmuCore/Rollback]', 'RunAhead = 1')
+    }
+}
 $out | Set-Content $ini -Encoding UTF8
 
 if ($Mode -eq 'setup') {

@@ -34,6 +34,7 @@
 #include "Rollback/Rollback.h"
 #include "Rollback/LatencyTest.h"
 #include "Rollback/Netplay.h"
+#include "Rollback/RunAhead.h"
 #include "Rollback/RollbackTest.h"
 #include "SIO/Memcard/MemoryCardFile.h"
 #include "SIO/Pad/Pad.h"
@@ -1683,6 +1684,7 @@ void VMManager::Shutdown(bool save_resume_state)
 
 	RollbackTest::Abort();
 	LatencyTest::Abort();
+	RunAhead::Abort();
 	Netplay::Stop();
 
 	SaveSessionTime(s_disc_serial);
@@ -1818,6 +1820,7 @@ void VMManager::Reset()
 
 	RollbackTest::Abort();
 	LatencyTest::Abort();
+	RunAhead::Abort();
 	Netplay::Stop();
 
 	ResetFrameLimiter();
@@ -1917,6 +1920,7 @@ bool VMManager::DoLoadState(const char* filename, Error* error)
 
 	RollbackTest::Abort();
 	LatencyTest::Abort();
+	RunAhead::Abort();
 	Netplay::Stop();
 
 	if (!SaveState_UnzipFromDisk(filename, error))
@@ -2291,7 +2295,7 @@ void VMManager::Internal::DelayFrameLimiter(double ms)
 
 void VMManager::Internal::Throttle()
 {
-	if (s_target_speed == 0.0f || s_use_vsync_for_timing || Rollback::g_resimulating)
+	if (s_target_speed == 0.0f || s_use_vsync_for_timing || Rollback::SkipThrottle())
 		return;
 
 	const u64 uExpectedEnd =
@@ -2791,6 +2795,7 @@ void VMManager::Execute()
 	// Rollback netplay and self-test: snapshots and restores happen here, outside of the CPU loop.
 	Netplay::OnExecutionExited();
 	LatencyTest::OnExecutionExited();
+	RunAhead::OnExecutionExited();
 	RollbackTest::OnExecutionExited();
 }
 
@@ -3022,6 +3027,8 @@ void VMManager::Internal::PollInputOnCPUThread()
 		Netplay::OnInputPolled();
 	else if (LatencyTest::IsActive())
 		LatencyTest::OnInputPolled();
+	else if (RunAhead::IsActive())
+		RunAhead::OnInputPolled();
 	else
 		RollbackTest::OnInputPolled();
 }

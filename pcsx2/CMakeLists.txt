@@ -963,6 +963,7 @@ set(pcsx2RecordingSources
 	Rollback/LatencyTest.cpp
 	Rollback/Netplay.cpp
 	Rollback/Rollback.cpp
+	Rollback/RunAhead.cpp
 	Rollback/RollbackTest.cpp
 	${rec_src}/Utilities/InputRecordingLogger.cpp
 )
@@ -976,6 +977,7 @@ set(pcsx2RecordingHeaders
 	Rollback/LatencyTest.h
 	Rollback/Netplay.h
 	Rollback/Rollback.h
+	Rollback/RunAhead.h
 	Rollback/RollbackTest.h
 	${rec_src}/Utilities/InputRecordingLogger.h
 )
