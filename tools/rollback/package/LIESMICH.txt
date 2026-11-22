@@ -45,7 +45,10 @@ Join (Spieler 2):
     "Join.bat" starten und die IP-Adresse des Hosts eingeben.
 
 Beide Spiele starten an derselben Stelle (Startdatei "start.p2s") und warten,
-bis die Verbindung steht. Oben im Bild erscheint dann "Netplay: connected".
+bis die Verbindung steht. So lange bleibt das Bild schwarz bzw. stehen, oben
+links zaehlt "Netplay: waiting for player 2 ..." die Sekunden hoch. Das ist
+normal. Sobald beide verbunden sind, erscheint "Netplay: connected" und das
+Spiel laeuft los.
 Jeder spielt mit seinem Controller an Port 1, das Spiel ordnet ihn
 automatisch dem richtigen Spieler zu.
 

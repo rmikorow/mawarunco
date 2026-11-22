@@ -97,6 +97,7 @@ if ($Mode -eq 'host') {
     Write-Host ''
     Write-Host "Du bist Host (Spieler 1). Warte auf UDP-Port $Port auf den anderen Spieler."
     Write-Host 'Der andere Spieler braucht deine oeffentliche IP-Adresse.'
+    Write-Host 'Bis er verbunden ist, bleibt das Spielbild stehen (schwarz). Das ist normal.'
 }
 else {
     $hostAddr = $HostAddress

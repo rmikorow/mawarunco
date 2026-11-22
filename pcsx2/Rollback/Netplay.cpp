@@ -70,6 +70,8 @@ namespace Netplay
 	static bool s_was_running = false;
 	static Common::Timer::Value s_wait_until = 0;
 	static int s_timesync_frame = -1; // frame for which the time sync wait was applied
+	static Common::Timer s_wait_timer; // since the session started (shown while waiting for the peer)
+	static u32 s_wait_shown_seconds = ~0u;
 
 	struct Stats
 	{
@@ -290,6 +292,8 @@ bool Netplay::Start(const Options& opts, Error* error)
 	s_was_running = false;
 	s_wait_until = 0;
 	s_timesync_frame = -1;
+	s_wait_timer.Reset();
+	s_wait_shown_seconds = ~0u;
 	s_stats = {};
 
 	if (opts.synctest)
@@ -424,7 +428,21 @@ bool Netplay::AdvanceSession()
 	}
 
 	if (!ggrs_is_running(s_session))
+	{
+		// The game does not run until both peers are connected; keep saying so, otherwise the frozen
+		// screen looks like a hang.
+		const u32 seconds = static_cast<u32>(s_wait_timer.GetTimeSeconds());
+		if (seconds != s_wait_shown_seconds)
+		{
+			s_wait_shown_seconds = seconds;
+			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_NETWORK_WIRED,
+				(s_options.remote == "any") ?
+					fmt::format("Netplay: waiting for player 2 (UDP port {}) ... {} s", s_options.local_port, seconds) :
+					fmt::format("Netplay: connecting to {} ... {} s", s_options.remote, seconds),
+				2.0f);
+		}
 		return false;
+	}
 
 	if (!s_was_running)
 	{
