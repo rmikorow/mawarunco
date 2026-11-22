@@ -86,6 +86,8 @@ function Convert-SettingsLine([string]$section, [string]$line) {
         'Hotkeys' { if ($line -match '^RollbackSelfTest') { return $null } }
         'EmuCore/Rollback' { if ($line -notmatch '^(DeterministicEEBlocks|DeterministicIOPBlocks) = ') { return $null } }
         'Pad2' { if ($line -match '^Type = ') { return 'Type = DualShock2' } }
+        # PINE (external memory access) stays off for players: a tool writing memory would desync netplay.
+        'EmuCore' { if ($line -match '^EnablePINE = ') { return 'EnablePINE = false' } }
     }
     return $line
 }
