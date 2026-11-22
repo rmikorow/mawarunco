@@ -55,6 +55,10 @@ automatisch dem richtigen Spieler zu.
 
 Beenden: einfach das Spielfenster schliessen.
 
+Training (alleine, ohne Verbindung):
+    "Training.bat" starten. Das Spiel startet automatisch bis zur
+    Charakterauswahl im Practice-Modus, alle Charaktere freigeschaltet.
+
 
 3. Gut zu wissen
 ----------------

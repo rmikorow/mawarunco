@@ -1,10 +1,10 @@
 # Fate/unlimited codes rollback netplay launcher (PCSX2 rollback fork).
-# Started by Host.bat / Join.bat. Finds the BIOS and the disc image, checks them against the reference
-# hashes, writes the BIOS into the settings and starts PCSX2 with the netplay session. The game boots
-# from the player's own disc image straight to the "Vs. 2P" character select (boot shortcut); there is no
-# shared savestate.
+# Started by Host.bat / Join.bat / Training.bat. Finds the BIOS and the disc image, checks them against
+# the reference hashes, writes the BIOS into the settings and starts PCSX2 with the netplay session. The
+# game boots from the player's own disc image straight to the "Vs. 2P" character select (boot shortcut);
+# there is no shared savestate. Training: offline, straight to the "Practice" character select.
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('host', 'join', 'setup')][string]$Mode,
+    [Parameter(Mandatory = $true)][ValidateSet('host', 'join', 'setup', 'practice')][string]$Mode,
     [string]$HostAddress = '',   # join: host address instead of asking
     [switch]$NoChecks            # testing: skip the confirmation prompts
 )
@@ -54,7 +54,8 @@ if (-not $bios) {
 }
 Write-Host "BIOS: $($bios.Name)"
 $biosHash = Get-Sha256 $bios.FullName
-if ($biosHash -ne $ExpectedBiosSha256) {
+# Only matters for netplay (both players boot their own BIOS).
+if ($biosHash -ne $ExpectedBiosSha256 -and $Mode -ne 'practice') {
     Confirm-Continue "Achtung: Dieses BIOS ist eine andere Version als beim Organisator ($ExpectedBiosName). Das kann zu Desyncs fuehren."
 }
 
@@ -96,6 +97,15 @@ if (-not $iso) {
     Stop-WithMessage 'Kein Spiel gefunden. Bitte das eigene Abbild von Fate/unlimited codes (SLPM-55108, .iso/.chd/.cso/.cue) in den Ordner "game" kopieren.'
 }
 Write-Host "Spiel: $($iso.Name)"
+
+# ---- Training (offline) -------------------------------------------------------------------------------
+if ($Mode -eq 'practice') {
+    Write-Host ''
+    Write-Host 'Training: Das Spiel startet bis zur Charakterauswahl im Practice-Modus (alle Charaktere frei).'
+    Write-Host 'PCSX2 startet. Zum Beenden einfach das Spielfenster schliessen.'
+    & $exe -batch -bootshortcut practice -- $iso.FullName | Out-Null
+    exit 0
+}
 
 # ---- Session ----------------------------------------------------------------------------------------
 if ($Mode -eq 'host') {

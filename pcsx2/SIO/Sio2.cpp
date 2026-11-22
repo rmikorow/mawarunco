@@ -12,6 +12,7 @@
 #include "SIO/Sio.h"
 #include "SIO/Sio2.h"
 #include "SIO/SioTypes.h"
+#include "Rollback/BootShortcut.h"
 #include "Rollback/Netplay.h"
 #include "SaveState.h"
 #include "StateWrapper.h"
@@ -533,7 +534,7 @@ bool Sio2::DoState(StateWrapper& sw)
 
 	// Rollback fork: an in-memory rollback restore must not eject the cards (that changes the SIO state
 	// at a point that depends on when the rollback happened), and netplay runs without cards.
-	if (sw.IsReading() && !g_SaveStateExactRestore && !Netplay::IsActive())
+	if (sw.IsReading() && !g_SaveStateExactRestore && !Netplay::IsActive() && !BootShortcut::MemoryCardsOff())
 	{
 		bool ejected = false;
 		for (u32 port = 0; port < SIO::PORTS && !ejected; port++)

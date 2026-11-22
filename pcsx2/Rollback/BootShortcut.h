@@ -27,7 +27,11 @@ class Error;
 //   dumpram              write EE RAM to logs/bootshortcut (diagnostics)
 //   shots=<N>            screenshot every N frames (diagnostics)
 //   slow                 run at normal speed instead of fast (diagnostics)
-// "vs2p" selects the built-in script for Fate/unlimited codes.
+// Built-in scripts for Fate/unlimited codes: "vs2p" ("Vs. 2P" character select) and "practice"
+// ("Practice" character select), both with all characters unlocked.
+//
+// Memory cards stay off for the whole session started with a shortcut (the script expects the game's
+// "no memory card" prompt, and card contents differ between machines).
 namespace BootShortcut
 {
 	/// Requests a shortcut for the next boot. Returns false (with error) if the script is invalid.
@@ -44,4 +48,10 @@ namespace BootShortcut
 
 	/// Cancels a running or pending shortcut (state load, reset, shutdown).
 	void Abort();
+
+	/// True from the request until the VM shuts down: no memory cards in this session.
+	bool MemoryCardsOff();
+
+	/// VM shutdown: aborts and ends the session (memory cards available again).
+	void OnShutdown();
 } // namespace BootShortcut

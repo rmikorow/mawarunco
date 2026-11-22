@@ -59,10 +59,12 @@ namespace BootShortcut
 		bool slow = false;
 	};
 
-	// Fate/unlimited codes (SLPM-55108): power-on to the "Vs. 2P" character select with all characters.
+	// Fate/unlimited codes (SLPM-55108): power-on to a main menu entry, all characters unlocked.
 	// Every wait has a wide margin: the game waits at each prompt, so pressing later is safe, and a
 	// slightly different boot timing (e.g. another BIOS) must not make a press miss.
-	static std::string Vs2pScript()
+	// Main menu wheel, ARCADE selected first: ARCADE, VS-CPU, VS-2P, WATCH, TUTORIAL, PRACTICE, ???,
+	// MISSION, EXTRA, OPTION.
+	static std::string FucMenuScript(int downs)
 	{
 		// "No memory card. Start without saving?" (shown at about frame 540): cursor to "yes", confirm.
 		std::string s = "w900 LEFT w20 CIRCLE w300";
@@ -73,12 +75,19 @@ namespace BootShortcut
 		// Unlock all characters: flags 0x200-0x212 of the game's progress bitfield, both in the active
 		// copy (0x523850) and in the copy that would be saved (0x523a40); byte 0x43 keeps its other flags.
 		s += " poke32:523890=ff07ffff poke32:523a80=ff07ffff";
-		// Main menu: ARCADE is selected, "VS - 2P" is two entries down. Then wait for the character select.
-		s += " w120 DOWN w20 DOWN w20 CIRCLE w500";
+		// Select the entry, then wait for its character select.
+		s += " w120";
+		for (int i = 0; i < downs; i++)
+			s += " DOWN w20";
+		s += " CIRCLE w500";
 		return s;
 	}
 
+	/// Built-in script by name, empty if the name is not a built-in one.
+	static std::string BuiltinScript(std::string_view name);
+
 	static std::optional<Script> s_pending;
+	static bool s_cards_off = false; // from the request until the VM shuts down
 	static Script s_script;
 	static bool s_running = false;
 	static size_t s_step = 0;
@@ -227,14 +236,37 @@ bool BootShortcut::Parse(std::string_view text, Script* out, Error* error)
 	return true;
 }
 
+std::string BootShortcut::BuiltinScript(std::string_view name)
+{
+	if (EqualNoCase(name, "vs2p"))
+		return FucMenuScript(2); // "Vs. 2P" character select
+	if (EqualNoCase(name, "practice"))
+		return FucMenuScript(5); // "Practice" character select
+	return {};
+}
+
 bool BootShortcut::Request(std::string_view script, Error* error)
 {
 	Script parsed;
-	const std::string builtin = EqualNoCase(script, "vs2p") ? Vs2pScript() : std::string();
+	const std::string builtin = BuiltinScript(script);
 	if (!Parse(builtin.empty() ? script : std::string_view(builtin), &parsed, error))
 		return false;
 	s_pending = std::move(parsed);
+	// The script expects the game's "no memory card" prompt, so the cards stay off for the whole session
+	// (also offline, where the card contents would differ between machines).
+	s_cards_off = true;
 	return true;
+}
+
+bool BootShortcut::MemoryCardsOff()
+{
+	return s_cards_off;
+}
+
+void BootShortcut::OnShutdown()
+{
+	Abort();
+	s_cards_off = false;
 }
 
 bool BootShortcut::IsActive()

@@ -1688,7 +1688,7 @@ void VMManager::Shutdown(bool save_resume_state)
 	RollbackTest::Abort();
 	LatencyTest::Abort();
 	RunAhead::Abort();
-	BootShortcut::Abort();
+	BootShortcut::OnShutdown();
 	Netplay::Stop();
 
 	SaveSessionTime(s_disc_serial);
