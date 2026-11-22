@@ -1339,7 +1339,8 @@ void MainWindow::updateWindowState(bool force_visible)
 	const bool has_window = s_vm_valid || m_display_surface;
 
 	// Need to test both valid and display widget because of startup (vm invalid while window is created).
-	const bool visible = force_visible || !hide_window || !has_window;
+	// Rollback fork: in launcher mode the launcher takes this window's place.
+	const bool visible = force_visible || (!m_launcher_mode && (!hide_window || !has_window));
 	if (isVisible() != visible)
 		setVisible(visible);
 
@@ -3312,6 +3313,17 @@ void MainWindow::openDebugger()
 {
 	DebuggerWindow* dwnd = DebuggerWindow::getInstance();
 	dwnd->isVisible() ? dwnd->activateWindow() : dwnd->show();
+}
+
+void MainWindow::setLauncherMode(bool enabled)
+{
+	m_launcher_mode = enabled;
+	updateWindowState();
+}
+
+void MainWindow::openControllerSettings()
+{
+	doControllerSettings(ControllerSettingsWindow::Category::FirstControllerSettings);
 }
 
 void MainWindow::doControllerSettings(ControllerSettingsWindow::Category category)

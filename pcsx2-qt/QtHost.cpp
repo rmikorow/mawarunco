@@ -32,6 +32,7 @@
 #include "pcsx2/MTGS.h"
 #include "pcsx2/PerformanceMetrics.h"
 #include "pcsx2/SPU2/spu2.h"
+#include "RollbackLauncher.h"
 #include "pcsx2/Rollback/BootShortcut.h"
 #include "pcsx2/Rollback/Netplay.h"
 #include "pcsx2/VMManager.h"
@@ -2553,8 +2554,17 @@ int main(int argc, char* argv[])
 	else
 		GameList::Refresh(false, true);
 
+	// Rollback fork: players of the package get the launcher instead of the main window (not when a game is
+	// booted from the command line).
+	if (!s_nogui_mode && !autoboot && !s_batch_mode && RollbackLauncher::IsEnabled())
+	{
+		g_main_window->setLauncherMode(true);
+		RollbackLauncher* launcher = new RollbackLauncher();
+		launcher->setAttribute(Qt::WA_DeleteOnClose);
+		launcher->show();
+	}
 	// Don't bother showing the window in no-gui mode.
-	if (!s_nogui_mode)
+	else if (!s_nogui_mode)
 	{
 		g_main_window->show();
 		g_main_window->raise();

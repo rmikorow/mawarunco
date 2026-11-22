@@ -178,6 +178,7 @@
     <ClCompile Include="DisplayWidget.cpp" />
     <ClCompile Include="ShortcutCreationDialog.cpp" />
     <ClCompile Include="QtHost.cpp" />
+    <ClCompile Include="RollbackLauncher.cpp" />
     <ClCompile Include="MainWindow.cpp" />
     <ClCompile Include="PrecompiledHeader.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
@@ -273,6 +274,7 @@
     <QtMoc Include="Settings\OsdFontPickerDialog.h" />
     <ClInclude Include="SettingWidgetBinder.h" />
     <QtMoc Include="QtHost.h" />
+    <QtMoc Include="RollbackLauncher.h" />
     <ClInclude Include="PrecompiledHeader.h" />
     <QtMoc Include="AboutDialog.h" />
     <QtMoc Include="AutoUpdaterDialog.h" />

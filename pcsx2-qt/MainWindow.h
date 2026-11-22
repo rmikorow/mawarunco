@@ -117,6 +117,11 @@ public:
 
 	void openDebugger();
 	void checkMousePosition(int x, int y);
+
+	/// Rollback fork: the launcher replaces this window while no game runs; it stays hidden then.
+	void setLauncherMode(bool enabled);
+	/// Rollback fork: controller settings opened on port 1 (key config of the launcher).
+	void openControllerSettings();
 public Q_SLOTS:
 	void checkForUpdates(bool display_message, bool force_check);
 	void refreshGameList(bool invalidate_cache, bool popup_on_error);
@@ -347,6 +352,7 @@ private:
 	bool m_was_paused_on_surface_loss = false;
 	bool m_was_disc_change_request = false;
 	bool m_is_closing = false;
+	bool m_launcher_mode = false; // Rollback fork, see setLauncherMode()
 	bool m_is_temporarily_windowed = false;
 
 	QString m_last_fps_status;

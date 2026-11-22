@@ -4,12 +4,12 @@
 #
 # Output: dist\FUC-Netplay-<date>.zip, built in dist\.staging\ (private to this script, deleted and
 # recreated on every run; to test the package, unzip it somewhere else). The package contains the emulator, sanitized
-# settings, the launcher, the tester guide, licenses and the fork's source patch. It never contains a
-# BIOS or a disc image; the reference BIOS is only used to compute a SHA-256 hash for the launcher.
+# settings with the start window switched on, the guide, licenses and the fork's source patch. It never
+# contains a BIOS or a disc image; the reference BIOS is only used to compute a hash for the start window.
 # The disc image is not checked: any dump of the game is accepted. There is no start savestate: both
-# players boot their own copy with the boot shortcut straight to the "Vs. 2P" character select.
+# players boot their own copy with the boot shortcut straight to the chosen mode.
 param(
-    # BIOS the launcher compares against (only its SHA-256 and file name go into the package).
+    # BIOS the start window compares against (only its MD5 and file name go into the package).
     [Parameter(Mandatory = $true)][string]$ReferenceBios,
     # Microsoft.VC143.CRT folder; found through vswhere when empty.
     [string]$VcRedistDir = '',
@@ -75,10 +75,11 @@ foreach ($dir in 'memcards', 'sstates', 'logs') {
 # ---- Settings: copy of the fork's settings without personal paths or test switches ------------------
 # Returns the line to write, or $null to drop it.
 function Convert-SettingsLine([string]$section, [string]$line) {
-    if ($section -eq 'GameListTableView') { return $null }
+    # The launcher section is written fresh below (the organizer's last host address stays private).
+    if ($section -in 'GameListTableView', 'Launcher') { return $null }
     if ($line -match '^\[|^$') { return $line }
     switch ($section) {
-        'UI' { if ($line -match '^MainWindow(Geometry|State) = ') { return $null } }
+        'UI' { if ($line -match '^(MainWindow(Geometry|State)|RollbackLauncher|RenderToSeparateWindow|HideMainWindowWhenRunning) = ') { return $null } }
         'Folders' { if ($line -match '^Bios = ') { return 'Bios = bios' } }
         'Filenames' { if ($line -match '^BIOS = ') { return 'BIOS = ' } }
         'GameList' { if ($line -match '^RecursivePaths = ') { return $null } }
@@ -100,21 +101,27 @@ $settings = foreach ($l in Get-Content (Join-Path $bin 'inis\PCSX2.ini')) {
     # Run-ahead (1 frame) is on in the package: ~10 ms less input latency, local only (cannot desync),
     # switches itself off on a PC that is too slow.
     if ($l -eq '[EmuCore/Rollback]') { 'RunAhead = 1' }
+    # The start window (pcsx2-qt/RollbackLauncher) replaces the main window; the game gets its own window.
+    if ($l -eq '[UI]') { 'RollbackLauncher = true'; 'RenderToSeparateWindow = true'; 'HideMainWindowWhenRunning = true' }
 }
+# Launcher defaults and the organizer's BIOS (only its MD5 and file name, to warn about another version).
+$settings = @($settings) + @(
+    '',
+    '[Launcher]',
+    'Delay = 1',
+    'Rollback = 2',
+    'Port = 7000',
+    "ReferenceBios = $(Split-Path $ReferenceBios -Leaf)",
+    "ReferenceBiosMD5 = $((Get-FileHash $ReferenceBios -Algorithm MD5).Hash)"
+)
 $settings | Set-Content (Join-Path $out 'inis\PCSX2.ini') -Encoding UTF8
 $check = Get-Content (Join-Path $out 'inis\PCSX2.ini') -Raw
 if ($check -match '[A-Z]:\\') { throw 'Sanitized settings still contain an absolute path.' }
+if ($check -notmatch '(?m)^RollbackLauncher = true') { throw 'Settings have no [UI] section for the launcher.' }
 
-# ---- Launcher with reference hashes, guide -----------------------------------------------------------
-$biosHash = (Get-FileHash $ReferenceBios -Algorithm SHA256).Hash
-(Get-Content (Join-Path $template 'netplay.ps1') -Raw) `
-    -replace '__BIOS_SHA256__', $biosHash `
-    -replace '__BIOS_NAME__', (Split-Path $ReferenceBios -Leaf) |
-    Set-Content (Join-Path $out 'netplay.ps1') -Encoding UTF8
+# ---- Guide ------------------------------------------------------------------------------------------------
 # Rewritten line by line so the package gets Windows line endings (CRLF) whatever the checkout uses.
-foreach ($f in 'Host.bat', 'Join.bat', 'Training.bat', 'Einstellungen.bat', 'LIESMICH.txt') {
-    Get-Content (Join-Path $template $f) | Set-Content (Join-Path $out $f) -Encoding ascii
-}
+Get-Content (Join-Path $template 'LIESMICH.txt') | Set-Content (Join-Path $out 'LIESMICH.txt') -Encoding ascii
 
 # ---- Licenses and source (GPL: the changes to PCSX2 v2.8.2 as a patch) -------------------------------
 $ggrs = Get-ChildItem (Join-Path $CargoHome 'registry\src') -Directory -Recurse -Filter 'ggrs-0.13.0' | Select-Object -First 1

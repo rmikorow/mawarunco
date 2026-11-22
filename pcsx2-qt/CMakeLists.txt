@@ -38,6 +38,8 @@ target_sources(pcsx2-qt PRIVATE
 	Translations.cpp
 	QtHost.cpp
 	QtHost.h
+	RollbackLauncher.cpp
+	RollbackLauncher.h
 	QtKeyCodes.cpp
 	QtProgressCallback.cpp
 	QtProgressCallback.h
