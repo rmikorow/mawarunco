@@ -1684,6 +1684,14 @@ bool MainWindow::requestShutdown(bool allow_confirm, bool allow_save_to_state, b
 	if (!s_vm_valid)
 		return true;
 
+	// Launcher mode: closing the game returns to the launcher. No question, and no resume state: the game
+	// always starts through the boot shortcut, and netplay must not resume from a local state.
+	if (m_launcher_mode)
+	{
+		allow_confirm = false;
+		allow_save_to_state = false;
+	}
+
 	// If we don't have a crc, we can't save state.
 	allow_save_to_state &= (s_current_disc_crc != 0);
 	bool save_state = allow_save_to_state && default_save_to_state;

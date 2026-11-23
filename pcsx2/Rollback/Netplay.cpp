@@ -690,9 +690,13 @@ bool Netplay::AdvanceSession()
 		{
 			char peer[64] = {};
 			ggrs_peer_address(s_session, peer, sizeof(peer));
-			Console.WriteLn(fmt::format("Netplay: connected to {}, running", peer));
-			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_NETWORK_WIRED, fmt::format("Netplay: connected to {}.", peer),
-				Host::OSD_INFO_DURATION);
+			// The host decides delay and rollback (ApplyRoomPayload); tell both players what the room uses,
+			// the joiner may have picked other values in the launcher.
+			const std::string room = fmt::format("delay {}, rollback {}{}", s_options.input_delay,
+				s_options.max_prediction, (s_options.local_player != 0) ? " (set by the host)" : "");
+			Console.WriteLn(fmt::format("Netplay: connected to {}, running, {}", peer, room));
+			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_NETWORK_WIRED,
+				fmt::format("Netplay: connected to {}.\nRoom: {}.", peer, room), 10.0f);
 		}
 	}
 
