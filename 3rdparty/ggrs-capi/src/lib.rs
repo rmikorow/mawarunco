@@ -11,6 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::ffi::{CStr, c_char};
 use std::io::ErrorKind;
+use bincode::Options;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::rc::Rc;
 
@@ -92,7 +93,17 @@ impl NonBlockingSocket<SocketAddr> for PeerSocket {
                     if self.buffer[..n].starts_with(HS_MAGIC) {
                         continue;
                     }
-                    let Ok(msg) = bincode::deserialize::<Message>(&self.buffer[..n]) else { continue };
+                    // Packets come from the internet: decode with a size limit (same format as
+                    // bincode::serialize: fixed-size integers, trailing bytes allowed), so a crafted length
+                    // field cannot make the decoder allocate more than a packet can hold.
+                    let Ok(msg) = bincode::DefaultOptions::new()
+                        .with_fixint_encoding()
+                        .allow_trailing_bytes()
+                        .with_limit(self.buffer.len() as u64)
+                        .deserialize::<Message>(&self.buffer[..n])
+                    else {
+                        continue;
+                    };
                     if self.peer.get().is_none() {
                         self.peer.set(Some(src));
                     }

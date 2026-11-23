@@ -37,6 +37,7 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <atomic>
 #include <string>
 #include <utility>
 #include <vector>
@@ -59,6 +60,7 @@ namespace Netplay
 		bool test_input = false; // testing: generated local input instead of the host controller
 		bool dump = false;       // diagnostics: write the snapshots of frames 0 and 60 to the log folder
 		int desync_test = -1;    // testing: player 2 changes one byte of EE RAM in this frame (desync diagnostics)
+		bool show_ping = false;  // shows the ping to the other player in the game
 	};
 
 	static constexpr u32 NUM_PLAYERS = Rollback::NUM_PORTS;
@@ -87,6 +89,7 @@ namespace Netplay
 	static int s_req_count = 0;
 	static int s_req_index = 0;
 	static bool s_was_running = false;
+	static std::atomic<bool> s_connected{false}; // s_was_running for other threads (launcher)
 	static int s_advance_frame = -1; // frame the next advance emulates (from the save before it)
 	// Session handshake carried in the input stream: in its first input (frame = its input delay) each peer
 	// sends its in-game button layout and a BIOS id instead of controller input. Both peers decode the
@@ -305,6 +308,10 @@ bool Netplay::SetLaunchOptions(std::string_view spec, Error* error)
 			}
 			FucButtons::SetLocal(*layout);
 		}
+		else if (key == "ping")
+		{
+			opts.show_ping = true;
+		}
 		else if (key == "name")
 		{
 			// The local player's name for the fight HUD; the launcher sets it directly.
@@ -353,6 +360,11 @@ bool Netplay::IsActive()
 	return s_session || s_net || s_pending.has_value();
 }
 
+bool Netplay::IsConnected()
+{
+	return s_connected.load(std::memory_order_acquire);
+}
+
 bool Netplay::Start(const Options& opts, Error* error)
 {
 	// A real match needs a DualShock 2 on both ports on both machines; the sync test also runs with an
@@ -390,6 +402,7 @@ bool Netplay::Start(const Options& opts, Error* error)
 	s_need_advance = true;
 	s_req_count = s_req_index = 0;
 	s_was_running = false;
+	s_connected.store(false, std::memory_order_release);
 	s_timesync_frame = -1;
 	s_wait_timer.Reset();
 	s_wait_shown_seconds = ~0u;
@@ -440,6 +453,7 @@ void Netplay::Stop()
 		s_stats.frames, s_stats.rollbacks, s_stats.resimulated, s_stats.max_rollback, s_stats.waits));
 	ggrs_free(s_session);
 	s_session = nullptr;
+	s_connected.store(false, std::memory_order_release);
 	Rollback::g_resimulating = false;
 	Rollback::EndInputInjection();
 	s_ring.clear();
@@ -550,7 +564,25 @@ void Netplay::PollRoomHandshake()
 
 	Error error;
 	const std::string_view remote_text(reinterpret_cast<const char*>(remote.data()), std::min<size_t>(n, remote.size()));
-	if (!ApplyRoomPayload(remote_text, &error) || !StartSession(&error))
+	if (!ApplyRoomPayload(remote_text, &error))
+	{
+		if (s_options.local_player != 0)
+		{
+			Fail(error.GetDescription());
+			return;
+		}
+		// The host was contacted by an incompatible program (another version, or not Mawarunco at all):
+		// turn it away and keep waiting for the real player, instead of ending the host's session.
+		Console.Warning(fmt::format("Netplay: rejected a connection: {}", error.GetDescription()));
+		Host::AddIconOSDMessage("NetplayRejected", ICON_FA_TRIANGLE_EXCLAMATION,
+			fmt::format("Netplay: turned away a connection ({}). Still waiting.", error.GetDescription()), Host::OSD_WARNING_DURATION);
+		ggrs_net_free(s_net);
+		s_net = ggrs_net_open(s_options.local_port, "any");
+		if (!s_net)
+			Fail(fmt::format("cannot wait again: {}", LastGgrsError()));
+		return;
+	}
+	if (!StartSession(&error))
 	{
 		Fail(error.GetDescription());
 		return;
@@ -644,6 +676,14 @@ void Netplay::OnExecutionExited()
 		s_stats.real_frames++;
 		if ((s_stats.real_frames % 600) == 0)
 			LogStats();
+		if (s_options.show_ping && !s_options.synctest && (s_stats.real_frames % 120) == 0)
+		{
+			GgrsNetworkStatsC ns = {};
+			if (ggrs_network_stats(s_session, (s_options.local_player == 0) ? 1 : 0, &ns) == 0)
+			{
+				Host::AddIconOSDMessage("NetplayPing", ICON_FA_NETWORK_WIRED, fmt::format("Ping {} ms", ns.ping_ms), 3.0f);
+			}
+		}
 	}
 	ProcessRequests();
 }
@@ -686,6 +726,7 @@ bool Netplay::AdvanceSession()
 	if (!s_was_running)
 	{
 		s_was_running = true;
+		s_connected.store(true, std::memory_order_release);
 		if (!s_options.synctest)
 		{
 			char peer[64] = {};

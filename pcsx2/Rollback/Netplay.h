@@ -29,6 +29,9 @@ namespace Netplay
 	/// True while a session runs or is about to start.
 	bool IsActive();
 
+	/// True once both peers are connected and the session runs (any thread).
+	bool IsConnected();
+
 	/// Called before Cpu->Execute(). Returns false while the CPU must not run (waiting for the peer).
 	bool BeforeExecute();
 
