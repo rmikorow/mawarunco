@@ -51,6 +51,11 @@ namespace FucButtons
 		{"Peculiar Parameter Up", 0x400000, true},
 	}};
 
+	static constexpr std::array<const char*, NUM_ACTIONS> MENU_NAMES = {"-", "L - ATTACK", "M - ATTACK", "H - ATTACK",
+		"REFLECT GUARD", "L + M ATTACK", "M + H ATTACK", "L + M + H ATTACK", "SP ATTACK A", "SP ATTACK B", "SP ATTACK C",
+		"EX ATTACK", "KEY RECORDING", "KEY REPLAY (PLAYER)", "KEY REPLAY (ENEMY)", "KEY REPLAY (REPEAT/PLAYER)",
+		"KEY REPLAY (REPEAT/ENEMY)", "CONTROL CHANGE", "ENEMY FORWARD", "ENEMY JUMP", "PECULIAR PARAMETER UP"};
+
 	static Layout s_local = Default();
 } // namespace FucButtons
 
@@ -67,6 +72,32 @@ const char* FucButtons::ActionName(u32 action)
 bool FucButtons::IsPracticeOnly(u32 action)
 {
 	return action < NUM_ACTIONS && ACTIONS[action].practice_only;
+}
+
+const char* FucButtons::ActionMenuName(u32 action)
+{
+	return (action < NUM_ACTIONS) ? MENU_NAMES[action] : "";
+}
+
+u32 FucButtons::ButtonForAction(const Layout& layout, u32 action)
+{
+	for (u32 i = 0; i < NUM_BUTTONS; i++)
+	{
+		if (layout[i] == action)
+			return i;
+	}
+	return NUM_BUTTONS;
+}
+
+void FucButtons::Assign(Layout& layout, u32 button, u32 action)
+{
+	if (button >= NUM_BUTTONS || action >= NUM_ACTIONS)
+		return;
+	const u32 previous_button = ButtonForAction(layout, action);
+	const u8 previous_action = layout[button];
+	layout[button] = static_cast<u8>(action);
+	if (previous_button < NUM_BUTTONS && previous_button != button)
+		layout[previous_button] = previous_action;
 }
 
 FucButtons::Layout FucButtons::Default()

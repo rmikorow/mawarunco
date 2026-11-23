@@ -12,6 +12,9 @@
 #include "pcsx2/Rollback/Netplay.h"
 #include "pcsx2/VMManager.h"
 #include "pcsx2/ps2/BiosTools.h"
+#include "pcsx2/Input/InputManager.h"
+
+#include "IconsPromptFont.h"
 
 #include "common/Error.h"
 #include "common/MD5Digest.h"
@@ -24,6 +27,9 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QTimer>
 #include <QtGui/QCloseEvent>
+#include <QtGui/QFontDatabase>
+#include <QtGui/QHideEvent>
+#include <QtGui/QKeyEvent>
 #include <QtCore/QSignalBlocker>
 #include <QtWidgets/QButtonGroup>
 #include <QtWidgets/QComboBox>
@@ -100,6 +106,19 @@ QLineEdit {
 	border-radius: 3px; padding: 8px; font-size: 14px; selection-background-color: #c8102e;
 }
 QLineEdit:focus { border-color: #e0c27a; }
+QPushButton#BindRow, QPushButton#BindRowPractice {
+	background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(70, 40, 120, 150), stop:1 rgba(30, 20, 60, 110));
+	border: 1px solid rgba(200, 162, 74, 40); border-radius: 3px;
+}
+QPushButton#BindRowPractice {
+	background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(120, 80, 30, 150), stop:1 rgba(60, 35, 20, 110));
+}
+QPushButton#BindRow:hover, QPushButton#BindRowPractice:hover { border-color: #e0c27a; }
+QPushButton#BindRow:checked, QPushButton#BindRowPractice:checked {
+	background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8a3cf0, stop:1 #3a2a9a); border-color: #ffffff;
+}
+QLabel#BindName { color: #f3e7c4; font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+QLabel#BindGlyph { color: #ffffff; }
 QComboBox {
 	color: #f3e7c4; background: rgba(0, 0, 0, 120); border: 1px solid rgba(200, 162, 74, 90);
 	border-radius: 3px; padding: 5px 8px; font-size: 13px;
@@ -272,51 +291,78 @@ RollbackLauncher::RollbackLauncher()
 	training->addStretch(1);
 
 	// ---- Page: button config ------------------------------------------------------------------------------
+	// Like the game's CONTROLLER SETTINGS menu: one row per action with the PS2 button it is on. Click a row,
+	// then press the button on your controller (the PCSX2 mapping of port 1 tells which PS2 button it is).
 	QVBoxLayout* buttons = nullptr;
 	QFrame* buttons_page = make_page(tr("BUTTON CONFIG"),
-		tr("The game's button config: which action each PS2 button does. Set it once; it is used for "
-		   "training and online, as player 1 or player 2."),
+		tr("Click an action, then press the button for it on your controller, like in the game's menu. Set it "
+		   "once: it is used for training and online, whether you are player 1 or player 2."),
 		&buttons);
 
-	QGridLayout* grid = new QGridLayout();
-	grid->setHorizontalSpacing(14);
-	grid->setVerticalSpacing(6);
-	for (u32 i = 0; i < FucButtons::NUM_BUTTONS; i++)
+	// PlayStation button glyphs from PromptFont (SIL OFL, shipped with PCSX2); no artwork from the game.
+	const int font_id = QFontDatabase::addApplicationFont(
+		QString::fromStdString(EmuFolders::GetOverridableResourcePath("fonts" FS_OSPATH_SEPARATOR_STR "promptfont.otf")));
+	const QStringList families = (font_id >= 0) ? QFontDatabase::applicationFontFamilies(font_id) : QStringList();
+	m_glyph_font = families.isEmpty() ? QFont() : QFont(families.first());
+	m_glyph_font.setPixelSize(22);
+
+	QGridLayout* rows = new QGridLayout();
+	rows->setHorizontalSpacing(12);
+	rows->setVerticalSpacing(4);
+	static constexpr int ROWS_PER_COLUMN = 10;
+	for (u32 action = 1; action < FucButtons::NUM_ACTIONS; action++)
 	{
-		QLabel* name = new QLabel(tr(FucButtons::ButtonName(i)), buttons_page);
-		QComboBox* combo = new QComboBox(buttons_page);
-		for (u32 a = 0; a < FucButtons::NUM_ACTIONS; a++)
-		{
-			const QString action = tr(FucButtons::ActionName(a));
-			combo->addItem(FucButtons::IsPracticeOnly(a) ? tr("%1  (practice only)").arg(action) : action, a);
-		}
-		m_button_combos[i] = combo;
-		// Two columns: face buttons left, shoulder buttons right.
-		const int row = static_cast<int>(i % 4);
-		const int col = static_cast<int>(i / 4) * 2;
-		grid->addWidget(name, row, col);
-		grid->addWidget(combo, row, col + 1);
-		connect(combo, &QComboBox::currentIndexChanged, this, &RollbackLauncher::onButtonLayoutChanged);
+		QPushButton* row = new QPushButton(buttons_page);
+		row->setObjectName(FucButtons::IsPracticeOnly(action) ? QStringLiteral("BindRowPractice") : QStringLiteral("BindRow"));
+		row->setCheckable(true);
+		row->setCursor(Qt::PointingHandCursor);
+		row->setMinimumHeight(30);
+		row->setAccessibleName(tr(FucButtons::ActionMenuName(action)));
+		QHBoxLayout* row_layout = new QHBoxLayout(row);
+		row_layout->setContentsMargins(12, 0, 10, 0);
+		QLabel* name = new QLabel(tr(FucButtons::ActionMenuName(action)), row);
+		name->setObjectName(QStringLiteral("BindName"));
+		name->setAttribute(Qt::WA_TransparentForMouseEvents);
+		row_layout->addWidget(name, 1);
+		QLabel* glyph = new QLabel(row);
+		glyph->setObjectName(QStringLiteral("BindGlyph"));
+		glyph->setFont(m_glyph_font);
+		glyph->setAttribute(Qt::WA_TransparentForMouseEvents);
+		row_layout->addWidget(glyph);
+		if (FucButtons::IsPracticeOnly(action))
+			row->setToolTip(tr("Practice mode only"));
+		m_action_rows[action] = row;
+		m_action_glyphs[action] = glyph;
+		const int index = static_cast<int>(action) - 1;
+		rows->addWidget(row, index % ROWS_PER_COLUMN, index / ROWS_PER_COLUMN);
+		connect(row, &QPushButton::clicked, this, [this, action]() {
+			if (m_listening_action == static_cast<int>(action))
+				stopListening();
+			else
+				startListening(action);
+		});
 	}
-	grid->setColumnStretch(1, 1);
-	grid->setColumnStretch(3, 1);
-	buttons->addLayout(grid);
+	buttons->addLayout(rows);
 
 	QHBoxLayout* button_actions = new QHBoxLayout();
+	m_bind_hint = new QLabel(buttons_page);
+	m_bind_hint->setObjectName(QStringLiteral("Hint"));
+	button_actions->addWidget(m_bind_hint, 1);
 	QPushButton* reset_buttons = new QPushButton(tr("Reset to default"), buttons_page);
 	reset_buttons->setObjectName(QStringLiteral("Tab"));
 	button_actions->addWidget(reset_buttons);
-	button_actions->addStretch(1);
 	buttons->addLayout(button_actions);
 
-	buttons->addSpacing(8);
+	QHBoxLayout* controller_row = new QHBoxLayout();
 	QLabel* controller_hint = new QLabel(
-		tr("Your controller: which of its buttons is which PS2 button (PCSX2 controller settings, port 1)."), buttons_page);
+		tr("Buttons not recognized? Map your controller first: which of its buttons is which PS2 button."), buttons_page);
 	controller_hint->setObjectName(QStringLiteral("Hint"));
 	controller_hint->setWordWrap(true);
-	buttons->addWidget(controller_hint);
-	QPushButton* key_button = make_action(tr("MAP CONTROLLER"));
-	buttons->addWidget(key_button);
+	controller_row->addWidget(controller_hint, 1);
+	QPushButton* key_button = new QPushButton(tr("Map controller"), buttons_page);
+	key_button->setObjectName(QStringLiteral("Tab"));
+	controller_row->addWidget(key_button);
+	buttons->addLayout(controller_row);
 	buttons->addStretch(1);
 	loadButtonLayout();
 
@@ -353,9 +399,8 @@ RollbackLauncher::RollbackLauncher()
 	connect(m_practice_button, &QPushButton::clicked, this, &RollbackLauncher::onPracticeClicked);
 	connect(key_button, &QPushButton::clicked, this, &RollbackLauncher::onKeyConfigClicked);
 	connect(reset_buttons, &QPushButton::clicked, this, [this]() {
-		FucButtons::SetLocal(FucButtons::Default());
-		loadButtonLayout();
-		onButtonLayoutChanged();
+		stopListening();
+		saveButtonLayout(FucButtons::Default());
 	});
 	connect(menu_quit, &QPushButton::clicked, this, &QWidget::close);
 
@@ -368,22 +413,99 @@ RollbackLauncher::RollbackLauncher()
 
 void RollbackLauncher::loadButtonLayout()
 {
+	// PromptFont glyphs in FucButtons button order: square, triangle, circle, cross, L1, L2, R1, R2.
+	static constexpr std::array<const char*, FucButtons::NUM_BUTTONS> glyphs = {ICON_PF_BUTTON_SQUARE,
+		ICON_PF_BUTTON_TRIANGLE, ICON_PF_BUTTON_CIRCLE, ICON_PF_BUTTON_CROSS, ICON_PF_LEFT_SHOULDER_L1,
+		ICON_PF_LEFT_TRIGGER_L2, ICON_PF_RIGHT_SHOULDER_R1, ICON_PF_RIGHT_TRIGGER_R2};
 	const FucButtons::Layout& layout = FucButtons::GetLocal();
-	for (u32 i = 0; i < FucButtons::NUM_BUTTONS; i++)
+	for (u32 action = 1; action < FucButtons::NUM_ACTIONS; action++)
 	{
-		QSignalBlocker block(m_button_combos[i]);
-		m_button_combos[i]->setCurrentIndex(m_button_combos[i]->findData(static_cast<u32>(layout[i])));
+		const u32 button = FucButtons::ButtonForAction(layout, action);
+		m_action_glyphs[action]->setText((button < FucButtons::NUM_BUTTONS) ? QString::fromUtf8(glyphs[button]) : QString());
+		m_action_glyphs[action]->setToolTip((button < FucButtons::NUM_BUTTONS) ? tr(FucButtons::ButtonName(button)) : QString());
 	}
 }
 
-void RollbackLauncher::onButtonLayoutChanged()
+void RollbackLauncher::saveButtonLayout(const FucButtons::Layout& layout)
 {
-	FucButtons::Layout layout;
-	for (u32 i = 0; i < FucButtons::NUM_BUTTONS; i++)
-		layout[i] = static_cast<u8>(m_button_combos[i]->currentData().toUInt());
 	FucButtons::SetLocal(layout);
 	Host::SetBaseStringSettingValue(SECTION, "ButtonLayout", FucButtons::ToString(layout).c_str());
 	Host::CommitBaseSettingChanges();
+	loadButtonLayout();
+}
+
+void RollbackLauncher::startListening(u32 action)
+{
+	stopListening();
+	m_listening_action = static_cast<int>(action);
+	m_action_rows[action]->setChecked(true);
+	m_bind_hint->setText(tr("Press a button for %1 ...   (Esc or click again to cancel)").arg(tr(FucButtons::ActionMenuName(action))));
+	InputManager::SetHook([this](InputBindingKey key, float value) {
+		QMetaObject::invokeMethod(this, "onBindingInput", Qt::QueuedConnection, Q_ARG(InputBindingKey, key), Q_ARG(float, value));
+		return InputInterceptHook::CallbackResult::StopProcessingEvent;
+	});
+}
+
+void RollbackLauncher::stopListening()
+{
+	if (m_listening_action < 0)
+		return;
+	InputManager::RemoveHook();
+	m_action_rows[static_cast<size_t>(m_listening_action)]->setChecked(false);
+	m_listening_action = -1;
+	m_bind_hint->clear();
+}
+
+void RollbackLauncher::onBindingInput(InputBindingKey key, float value)
+{
+	if (m_listening_action < 0 || std::abs(value) < 0.5f)
+		return;
+
+	// The binding string as PCSX2 stores it (half axes such as triggers carry their direction).
+	InputBindingKey bound = key;
+	bound.modifier = (value < 0.0f) ? InputModifier::Negate : InputModifier::None;
+	const std::string binding = InputManager::ConvertInputBindingKeyToString(InputBindingInfo::Type::Button, bound);
+	if (binding == "Keyboard/Escape")
+	{
+		stopListening();
+		return;
+	}
+
+	// Which PS2 button of port 1 is mapped to it?
+	for (u32 button = 0; button < FucButtons::NUM_BUTTONS; button++)
+	{
+		for (const std::string& entry : Host::GetBaseStringListSetting("Pad1", FucButtons::ButtonName(button)))
+		{
+			if (entry == binding)
+			{
+				FucButtons::Layout layout = FucButtons::GetLocal();
+				FucButtons::Assign(layout, button, static_cast<u32>(m_listening_action));
+				stopListening();
+				saveButtonLayout(layout);
+				return;
+			}
+		}
+	}
+	m_bind_hint->setText(tr("%1 is not one of the PS2 buttons the game lets you assign (square, triangle, circle, cross, "
+							"L1, L2, R1, R2). Press another button, or map your controller first.")
+							 .arg(QString::fromStdString(binding)));
+}
+
+void RollbackLauncher::keyPressEvent(QKeyEvent* event)
+{
+	// Keyboard input does not reach PCSX2's input manager from this window, so Esc is handled here.
+	if (event->key() == Qt::Key_Escape && m_listening_action >= 0)
+	{
+		stopListening();
+		return;
+	}
+	QWidget::keyPressEvent(event);
+}
+
+void RollbackLauncher::hideEvent(QHideEvent* event)
+{
+	stopListening();
+	QWidget::hideEvent(event);
 }
 
 int RollbackLauncher::selectedDelay() const

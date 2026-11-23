@@ -36,6 +36,16 @@ namespace FucButtons
 	/// True for the actions that only work in practice mode.
 	bool IsPracticeOnly(u32 action);
 
+	/// Action name as the game's menu writes it, e.g. "L - ATTACK".
+	const char* ActionMenuName(u32 action);
+
+	/// Assigns a button to an action the way the game's menu does: the button gets the action, and the
+	/// button that had the action before gets the button's previous action (swap).
+	void Assign(Layout& layout, u32 button, u32 action);
+
+	/// Button that has the action, or NUM_BUTTONS if none.
+	u32 ButtonForAction(const Layout& layout, u32 action);
+
 	/// The game's default layout.
 	Layout Default();
 

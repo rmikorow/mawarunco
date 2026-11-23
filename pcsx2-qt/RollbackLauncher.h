@@ -3,6 +3,10 @@
 
 #pragma once
 
+#include "pcsx2/Input/InputManager.h"
+#include "pcsx2/Rollback/FucButtons.h"
+
+#include <QtGui/QFont>
 #include <QtWidgets/QWidget>
 
 #include <array>
@@ -37,13 +41,15 @@ public:
 
 protected:
 	void closeEvent(QCloseEvent* event) override;
+	void hideEvent(QHideEvent* event) override;
+	void keyPressEvent(QKeyEvent* event) override;
 
 private Q_SLOTS:
 	void onHostClicked();
 	void onJoinClicked();
 	void onPracticeClicked();
 	void onKeyConfigClicked();
-	void onButtonLayoutChanged();
+	void onBindingInput(InputBindingKey key, float value);
 
 private:
 	/// Finds BIOS and disc image and updates the status lines. Returns true if both are there.
@@ -51,8 +57,12 @@ private:
 	/// Saves the chosen delay and address, sets the BIOS and both controller ports, boots the game.
 	void boot(const std::string& netplay_spec, const char* shortcut);
 	int selectedDelay() const;
-	/// Shows the local in-game button layout in the combo boxes.
+	/// Shows the local in-game button layout in the action rows.
 	void loadButtonLayout();
+	void saveButtonLayout(const FucButtons::Layout& layout);
+	/// Waits for a controller button for the action (button config page).
+	void startListening(u32 action);
+	void stopListening();
 
 	QLabel* m_bios_status = nullptr;
 	QLabel* m_game_status = nullptr;
@@ -62,7 +72,12 @@ private:
 	QPushButton* m_host_button = nullptr;
 	QPushButton* m_join_button = nullptr;
 	QPushButton* m_practice_button = nullptr;
-	std::array<QComboBox*, 8> m_button_combos = {}; // in-game action per PS2 button (FucButtons order)
+	// Button config page: one row per action (index = action, 0 unused) with the glyph of its button.
+	std::array<QPushButton*, FucButtons::NUM_ACTIONS> m_action_rows = {};
+	std::array<QLabel*, FucButtons::NUM_ACTIONS> m_action_glyphs = {};
+	QLabel* m_bind_hint = nullptr;
+	QFont m_glyph_font;
+	int m_listening_action = -1; // action waiting for a button, -1 = none
 
 	std::string m_bios_file;  // file name in the BIOS folder
 	std::string m_game_path;  // full path of the disc image
