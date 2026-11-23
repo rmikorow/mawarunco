@@ -1,0 +1,18 @@
+Fate/unlimited codes Netplay - unofficial PCSX2 rollback build
+
+This program is a modified version of PCSX2 (https://github.com/PCSX2/pcsx2),
+licensed under the GNU General Public License version 3 or later. The full
+license text is installed as docs\GPL.html; the changes to PCSX2 v2.8.2 are
+installed as a patch in the "source" folder. GGRS (rollback library) is
+licensed under MIT / Apache-2.0 (docs\ggrs). Other third-party licenses:
+docs\ThirdPartyLicenses.html.
+
+This build is not affiliated with or supported by the PCSX2 team. Please do
+not report problems with it to the PCSX2 project.
+
+The program contains no BIOS, no game image and no game data. You need your
+own PS2 BIOS and your own copy of Fate/unlimited codes (SLPM-55108).
+
+The program downloads nothing, starts no other programs and does not change
+Windows settings. Over the network it only exchanges controller input with
+the other player during an online session.

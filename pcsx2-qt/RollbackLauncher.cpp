@@ -26,6 +26,8 @@
 #include "fmt/format.h"
 
 #include <QtCore/QPropertyAnimation>
+#include <QtCore/QDir>
+#include <QtCore/QFile>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QTimer>
 #include <QtGui/QCloseEvent>
@@ -40,6 +42,7 @@
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QStackedWidget>
+#include <QtWidgets/QFileDialog>
 #include <QtWidgets/QGraphicsOpacityEffect>
 #include <QtWidgets/QGridLayout>
 #include <QtWidgets/QGroupBox>
@@ -153,6 +156,8 @@ RollbackLauncher::RollbackLauncher()
 	setWindowTitle(tr("Fate/unlimited codes - Rollback"));
 	setWindowIcon(QtHost::GetAppIcon());
 	setMinimumSize(900, 600);
+
+	importInstallerChoices();
 
 	// The local player's in-game button layout (kept here, the game cannot save it with memory cards off).
 	if (const std::optional<FucButtons::Layout> layout =
@@ -499,9 +504,23 @@ RollbackLauncher::RollbackLauncher()
 	m_bios_status->setObjectName(QStringLiteral("Status"));
 	m_game_status = new QLabel(this);
 	m_game_status->setObjectName(QStringLiteral("Status"));
+	auto make_browse = [this](const QString& tip) {
+		QPushButton* b = new QPushButton(tr("Browse..."), this);
+		b->setObjectName(QStringLiteral("Tab"));
+		b->setToolTip(tip);
+		b->setCursor(Qt::PointingHandCursor);
+		return b;
+	};
+	QPushButton* bios_browse = make_browse(tr("Choose your PS2 BIOS file (it is copied into the \"bios\" folder)"));
+	QPushButton* game_browse = make_browse(tr("Choose your disc image of Fate/unlimited codes (it stays where it is)"));
 	footer->addWidget(m_bios_status);
+	footer->addWidget(bios_browse);
+	footer->addSpacing(16);
 	footer->addWidget(m_game_status);
+	footer->addWidget(game_browse);
 	footer->addStretch(1);
+	connect(bios_browse, &QPushButton::clicked, this, &RollbackLauncher::onBrowseBios);
+	connect(game_browse, &QPushButton::clicked, this, &RollbackLauncher::onBrowseGame);
 	QLabel* footer_hint = new QLabel(tr("Fullscreen: Alt+Enter   -   End a game: close the game window"), this);
 	footer_hint->setObjectName(QStringLiteral("Hint"));
 	footer->addWidget(footer_hint);
@@ -854,7 +873,7 @@ bool RollbackLauncher::refreshStatus()
 	if (m_bios_file.empty())
 	{
 		m_bios_status->setText(QStringLiteral("<span style='color:#ff6b6b'>&#9679;</span> ") +
-							   tr("BIOS missing - copy your own BIOS file (4 MB) into the \"bios\" folder"));
+							   tr("BIOS missing - choose your BIOS file"));
 	}
 	else
 	{
@@ -892,8 +911,14 @@ bool RollbackLauncher::refreshStatus()
 					  QString::fromStdString(m_bios_file));
 	}
 
-	// Game: the first disc image in the "game" folder next to the emulator.
+	// Game: the chosen disc image ([Launcher] GamePath, set by the installer or "Browse..."), otherwise the
+	// first disc image in the "game" folder next to the emulator.
 	m_game_path.clear();
+	if (const std::string chosen = Host::GetBaseStringSettingValue(SECTION, "GamePath", "");
+		!chosen.empty() && FileSystem::FileExists(chosen.c_str()))
+	{
+		m_game_path = chosen;
+	}
 	const std::string game_dir = Path::Combine(EmuFolders::AppRoot, "game");
 	FileSystem::FindResultsArray files;
 	FileSystem::FindFiles(game_dir.c_str(), "*",
@@ -901,6 +926,8 @@ bool RollbackLauncher::refreshStatus()
 	static constexpr std::array<const char*, 5> extensions = {".iso", ".chd", ".cso", ".zso", ".cue"};
 	for (const FILESYSTEM_FIND_DATA& fd : files)
 	{
+		if (!m_game_path.empty())
+			break;
 		for (const char* ext : extensions)
 		{
 			if (StringUtil::EndsWithNoCase(fd.FileName, ext))
@@ -914,11 +941,78 @@ bool RollbackLauncher::refreshStatus()
 	}
 	m_game_status->setText(m_game_path.empty() ?
 							   QStringLiteral("<span style='color:#ff6b6b'>&#9679;</span> ") +
-								   tr("Game missing - copy your own disc image (.iso/.chd/.cso/.cue) into the \"game\" folder") :
+								   tr("Game missing - choose your disc image") :
 							   QStringLiteral("<span style='color:#6fd08c'>&#9679;</span> ") + tr("Game %1")
 								   .arg(QString::fromStdString(std::string(Path::GetFileName(m_game_path))).toHtmlEscaped()));
 
 	return !m_bios_file.empty() && !m_game_path.empty();
+}
+
+void RollbackLauncher::importInstallerChoices()
+{
+	// The installer leaves the player's choices in inis\launcher-setup.txt (UTF-8, "key=value" lines;
+	// Inno Setup cannot write the UTF-8 settings file itself). Taken over once, then deleted.
+	QFile file(QString::fromStdString(Path::Combine(EmuFolders::Settings, "launcher-setup.txt")));
+	if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+		return;
+	const QStringList lines = QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'));
+	file.close();
+	for (QString line : lines)
+	{
+		line = line.trimmed();
+		if (line.startsWith(QChar(0xFEFF)))
+			line.remove(0, 1);
+		const qsizetype eq = line.indexOf(QLatin1Char('='));
+		if (eq <= 0)
+			continue;
+		const QString key = line.left(eq).trimmed();
+		const QByteArray value = line.mid(eq + 1).trimmed().toUtf8();
+		if (key == QLatin1String("GamePath") && !value.isEmpty())
+			Host::SetBaseStringSettingValue(SECTION, "GamePath", value.constData());
+		else if (key == QLatin1String("BIOS") && !value.isEmpty())
+			Host::SetBaseStringSettingValue("Filenames", "BIOS", value.constData());
+	}
+	Host::CommitBaseSettingChanges();
+	file.remove();
+}
+
+void RollbackLauncher::onBrowseBios()
+{
+	const QString file = QFileDialog::getOpenFileName(this, tr("Choose your PS2 BIOS"), QString(),
+		tr("PS2 BIOS (*.bin *.rom *.rom0);;All files (*.*)"));
+	if (file.isEmpty())
+		return;
+	const std::string path = QDir::toNativeSeparators(file).toStdString();
+	u32 version, region;
+	std::string description, zone;
+	if (!IsBIOS(path.c_str(), version, description, region, zone))
+	{
+		QMessageBox::warning(this, windowTitle(), tr("This file is not a PS2 BIOS."));
+		return;
+	}
+	// Copied next to the emulator, so the setup keeps working when the original file moves.
+	const std::string name(Path::GetFileName(path));
+	const std::string target = Path::Combine(EmuFolders::Bios, name);
+	FileSystem::EnsureDirectoryExists(EmuFolders::Bios.c_str(), false);
+	if (path != target && !FileSystem::CopyFilePath(path.c_str(), target.c_str(), true))
+	{
+		QMessageBox::warning(this, windowTitle(), tr("Could not copy the BIOS into the \"bios\" folder."));
+		return;
+	}
+	Host::SetBaseStringSettingValue("Filenames", "BIOS", name.c_str());
+	Host::CommitBaseSettingChanges();
+	refreshStatus();
+}
+
+void RollbackLauncher::onBrowseGame()
+{
+	const QString file = QFileDialog::getOpenFileName(this, tr("Choose your disc image of Fate/unlimited codes"),
+		QString(), tr("Disc images (*.iso *.chd *.cso *.zso *.cue);;All files (*.*)"));
+	if (file.isEmpty())
+		return;
+	Host::SetBaseStringSettingValue(SECTION, "GamePath", QDir::toNativeSeparators(file).toUtf8().constData());
+	Host::CommitBaseSettingChanges();
+	refreshStatus();
 }
 
 void RollbackLauncher::showAgain()

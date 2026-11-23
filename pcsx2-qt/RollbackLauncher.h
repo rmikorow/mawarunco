@@ -57,6 +57,8 @@ private Q_SLOTS:
 	void onBindingInput(InputBindingKey key, float value);
 	void onRightHeld();
 	void applyWindowSize();
+	void onBrowseBios();
+	void onBrowseGame();
 
 private:
 	/// Finds BIOS and disc image and updates the status lines. Returns true if both are there.
@@ -64,6 +66,8 @@ private:
 	/// Saves the chosen delay and address, sets the BIOS and both controller ports, boots the game.
 	void boot(const std::string& netplay_spec, const char* shortcut);
 	int selectedDelay() const;
+	/// Takes over the BIOS and disc image chosen in the installer (inis\launcher-setup.txt).
+	void importInstallerChoices();
 	/// Shows the local in-game button layout in the action rows.
 	void loadButtonLayout();
 	void saveButtonLayout(const FucButtons::Layout& layout);

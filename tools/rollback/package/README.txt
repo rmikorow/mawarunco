@@ -9,6 +9,12 @@ address. One hosts (player 1), the other joins (player 2).
 1. One-time setup
 -----------------
 
+Easiest: run "FUC-Netplay-Setup-<date>.exe". It installs without admin
+rights, asks for your BIOS and your disc image, and creates shortcuts.
+Running a newer setup later updates the program and keeps your settings.
+With the zip package instead, do a) and b) below (or choose both files in
+the start window with "Browse...").
+
 a) BIOS: copy the BIOS file of your own PS2 (4 MB, usually .bin) into the
    "bios" folder.
 

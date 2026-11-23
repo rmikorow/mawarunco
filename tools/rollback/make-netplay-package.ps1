@@ -17,7 +17,11 @@ param(
     [string]$CargoHome = '',
     # Also build a patch for players who already have the package: program, guide and source only, no
     # settings (their controller mapping, button config, delay and host address stay).
-    [switch]$Update
+    [switch]$Update,
+    # Also build the installer dist\FUC-Netplay-Setup-<date>.exe (Inno Setup 6; ISCC.exe from
+    # <Inno Setup folder>, the PATH or -IsccPath).
+    [switch]$Installer,
+    [string]$IsccPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -152,7 +156,7 @@ finally { Pop-Location }
 # ---- Zip ----------------------------------------------------------------------------------------------
 # Only the newest package (and patch) stays in dist, so it is always clear which one to send. Only zip
 # files and their checksum files are removed, never a folder (dist\FUC-Netplay may be a player's copy).
-Get-ChildItem $dist -File | Where-Object { $_.Name -match '^FUC-Netplay-(Patch-)?\d{8}\.zip(\.sha256\.txt)?$' } |
+Get-ChildItem $dist -File | Where-Object { $_.Name -match '^FUC-Netplay-((Patch-)?\d{8}\.zip|Setup-[\d.]+\.exe)(\.sha256\.txt)?$' } |
     Remove-Item -Force
 $zip = Join-Path $dist ("FUC-Netplay-{0}.zip" -f (Get-Date -Format 'yyyyMMdd'))
 Compress-Archive -Path (Join-Path $out '*') -DestinationPath $zip -CompressionLevel Optimal
@@ -184,4 +188,22 @@ if ($Update) {
     "$uhash  $(Split-Path $uzip -Leaf)" | Set-Content "$uzip.sha256.txt" -Encoding ascii
     Write-Host ("Patch:   {0} ({1:N0} MB)" -f $uzip, ((Get-Item $uzip).Length / 1MB))
     Write-Host "SHA-256: $uhash"
+}
+
+# ---- Installer ----------------------------------------------------------------------------------------------
+if ($Installer) {
+    if (-not $IsccPath) {
+        $IsccPath = @('<Inno Setup folder>\ISCC.exe', (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source) |
+            Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+    }
+    if (-not $IsccPath) { throw 'Inno Setup compiler (ISCC.exe) not found, pass -IsccPath.' }
+    $version = Get-Date -Format 'yyyy.MM.dd'
+    $iss = Join-Path $PSScriptRoot 'installer\fuc-netplay.iss'
+    & $IsccPath /Q "/DSourceDir=$out" "/DOutputDir=$dist" "/DAppVersion=$version" "/DRepoDir=$repo" $iss
+    if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)." }
+    $setup = Join-Path $dist "FUC-Netplay-Setup-$version.exe"
+    $shash = (Get-FileHash $setup -Algorithm SHA256).Hash
+    "$shash  $(Split-Path $setup -Leaf)" | Set-Content "$setup.sha256.txt" -Encoding ascii
+    Write-Host ("Setup:   {0} ({1:N0} MB)" -f $setup, ((Get-Item $setup).Length / 1MB))
+    Write-Host "SHA-256: $shash"
 }
