@@ -113,8 +113,14 @@ function db(array $config): PDO
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
         ]);
-    } catch (PDOException) {
-        fail(503, 'database unavailable');
+    } catch (PDOException $e) {
+        // Only the driver's error number (e.g. 1045 access denied, 1049 unknown database, 2002 server not
+        // found), never the message: that can contain the host or user name.
+        $code = (int) ($e->errorInfo[1] ?? 0);
+        if ($code === 0 && str_contains($e->getMessage(), 'could not find driver')) {
+            fail(503, 'database unavailable (no MySQL driver in PHP)');
+        }
+        fail(503, 'database unavailable' . ($code > 0 ? " ($code)" : ''));
     }
     return $pdo;
 }
