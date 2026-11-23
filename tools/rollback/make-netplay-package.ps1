@@ -14,7 +14,10 @@ param(
     # Microsoft.VC143.CRT folder; found through vswhere when empty.
     [string]$VcRedistDir = '',
     # Folder of the cargo home (for the GGRS license files); derived when empty.
-    [string]$CargoHome = ''
+    [string]$CargoHome = '',
+    # Also build a patch for players who already have the package: program, guide and source only, no
+    # settings (their controller mapping, button config, delay and host address stay).
+    [switch]$Update
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,8 +69,8 @@ foreach ($dir in 'bios', 'game', 'memcards', 'sstates', 'logs', 'inis', 'source'
     New-Item -ItemType Directory -Force (Join-Path $out $dir) | Out-Null
 }
 # Zip archives drop empty folders, so the folders the tester fills get a note.
-'Hier die eigene PS2-BIOS-Datei (4 MB, meist .bin) hineinkopieren.' | Set-Content (Join-Path $out 'bios\BIOS_HIER_HINEIN.txt') -Encoding UTF8
-'Hier das eigene ISO von Fate/unlimited codes (SLPM-55108) hineinkopieren.' | Set-Content (Join-Path $out 'game\ISO_HIER_HINEIN.txt') -Encoding UTF8
+'Copy your own PS2 BIOS file (4 MB, usually .bin) into this folder.' | Set-Content (Join-Path $out 'bios\PUT_BIOS_HERE.txt') -Encoding UTF8
+'Copy your own disc image of Fate/unlimited codes (SLPM-55108) into this folder.' | Set-Content (Join-Path $out 'game\PUT_GAME_HERE.txt') -Encoding UTF8
 foreach ($dir in 'memcards', 'sstates', 'logs') {
     'PCSX2 data folder.' | Set-Content (Join-Path $out "$dir\README.txt") -Encoding UTF8
 }
@@ -121,7 +124,7 @@ if ($check -notmatch '(?m)^RollbackLauncher = true') { throw 'Settings have no [
 
 # ---- Guide ------------------------------------------------------------------------------------------------
 # Rewritten line by line so the package gets Windows line endings (CRLF) whatever the checkout uses.
-Get-Content (Join-Path $template 'LIESMICH.txt') | Set-Content (Join-Path $out 'LIESMICH.txt') -Encoding ascii
+Get-Content (Join-Path $template 'README.txt') | Set-Content (Join-Path $out 'README.txt') -Encoding ascii
 
 # ---- Licenses and source (GPL: the changes to PCSX2 v2.8.2 as a patch) -------------------------------
 $ggrs = Get-ChildItem (Join-Path $CargoHome 'registry\src') -Directory -Recurse -Filter 'ggrs-0.13.0' | Select-Object -First 1
@@ -156,3 +159,26 @@ $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
 "$hash  $(Split-Path $zip -Leaf)" | Set-Content "$zip.sha256.txt" -Encoding ascii
 Write-Host ("Package: {0} ({1:N0} MB)" -f $zip, $size)
 Write-Host "SHA-256: $hash"
+
+# ---- Patch for existing installations --------------------------------------------------------------------
+if ($Update) {
+    $upd = Join-Path $staging 'update'
+    New-Item -ItemType Directory -Force (Join-Path $upd 'source') | Out-Null
+    Copy-Item (Join-Path $out 'pcsx2-qtx64-clang.exe'), (Join-Path $out 'README.txt') -Destination $upd
+    Copy-Item (Join-Path $out 'source\*') -Destination (Join-Path $upd 'source')
+    @(
+        'Patch for an existing Fate/unlimited codes netplay folder.',
+        '',
+        'Close the program, then copy the contents of this zip into your folder and replace the files.',
+        'Your settings (controller, button config, delay, host address) stay as they are.',
+        'Old files from earlier versions that are no longer needed: Host.bat, Join.bat, Training.bat,',
+        'Einstellungen.bat, netplay.ps1, start.p2s, LIESMICH.txt (you can delete them).'
+    ) | Set-Content (Join-Path $upd 'PATCH_README.txt') -Encoding ascii
+    $uzip = Join-Path $dist ("FUC-Netplay-Patch-{0}.zip" -f (Get-Date -Format 'yyyyMMdd'))
+    if (Test-Path $uzip) { Remove-Item $uzip -Force }
+    Compress-Archive -Path (Join-Path $upd '*') -DestinationPath $uzip -CompressionLevel Optimal
+    $uhash = (Get-FileHash $uzip -Algorithm SHA256).Hash
+    "$uhash  $(Split-Path $uzip -Leaf)" | Set-Content "$uzip.sha256.txt" -Encoding ascii
+    Write-Host ("Patch:   {0} ({1:N0} MB)" -f $uzip, ((Get-Item $uzip).Length / 1MB))
+    Write-Host "SHA-256: $uhash"
+}

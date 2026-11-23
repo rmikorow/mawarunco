@@ -8,6 +8,7 @@
 #include "pcsx2/Config.h"
 #include "pcsx2/Host.h"
 #include "pcsx2/Rollback/BootShortcut.h"
+#include "pcsx2/Rollback/FucButtons.h"
 #include "pcsx2/Rollback/Netplay.h"
 #include "pcsx2/VMManager.h"
 #include "pcsx2/ps2/BiosTools.h"
@@ -23,7 +24,9 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QTimer>
 #include <QtGui/QCloseEvent>
+#include <QtCore/QSignalBlocker>
 #include <QtWidgets/QButtonGroup>
+#include <QtWidgets/QComboBox>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QStackedWidget>
 #include <QtWidgets/QGridLayout>
@@ -97,16 +100,30 @@ QLineEdit {
 	border-radius: 3px; padding: 8px; font-size: 14px; selection-background-color: #c8102e;
 }
 QLineEdit:focus { border-color: #e0c27a; }
+QComboBox {
+	color: #f3e7c4; background: rgba(0, 0, 0, 120); border: 1px solid rgba(200, 162, 74, 90);
+	border-radius: 3px; padding: 5px 8px; font-size: 13px;
+}
+QComboBox:hover { border-color: #e0c27a; }
+QComboBox QAbstractItemView { color: #e9e2d6; background: #1a0c14; selection-background-color: #c8102e; }
 )";
 
 RollbackLauncher::RollbackLauncher()
 {
+	// All texts go through tr() (context "RollbackLauncher"), so translations can be added later.
 	setObjectName(QStringLiteral("RollbackLauncher"));
 	setAttribute(Qt::WA_StyledBackground, true);
 	setStyleSheet(QString::fromUtf8(LAUNCHER_STYLE));
-	setWindowTitle(QStringLiteral("Fate/unlimited codes - Rollback"));
+	setWindowTitle(tr("Fate/unlimited codes - Rollback"));
 	setWindowIcon(QtHost::GetAppIcon());
-	setMinimumSize(860, 520);
+	setMinimumSize(900, 600);
+
+	// The local player's in-game button layout (kept here, the game cannot save it with memory cards off).
+	if (const std::optional<FucButtons::Layout> layout =
+			FucButtons::FromString(Host::GetBaseStringSettingValue(SECTION, "ButtonLayout", "")))
+	{
+		FucButtons::SetLocal(*layout);
+	}
 
 	QVBoxLayout* root = new QVBoxLayout(this);
 	root->setContentsMargins(28, 22, 28, 16);
@@ -115,7 +132,7 @@ RollbackLauncher::RollbackLauncher()
 	// ---- Header ---------------------------------------------------------------------------------------------
 	QLabel* title = new QLabel(QStringLiteral("FATE / UNLIMITED CODES"), this);
 	title->setObjectName(QStringLiteral("Title"));
-	QLabel* subtitle = new QLabel(QStringLiteral("ROLLBACK NETPLAY"), this);
+	QLabel* subtitle = new QLabel(tr("ROLLBACK NETPLAY"), this);
 	subtitle->setObjectName(QStringLiteral("Subtitle"));
 	root->addWidget(title);
 	root->addWidget(subtitle);
@@ -179,22 +196,22 @@ RollbackLauncher::RollbackLauncher()
 
 	// ---- Page: online ------------------------------------------------------------------------------------
 	QVBoxLayout* online = nullptr;
-	QFrame* online_page = make_page(QStringLiteral("ONLINE  -  VS. 2P"),
-		QStringLiteral("Beide Spieler starten das Spiel aus ihrer eigenen Kopie bis zur Charakterauswahl, "
-					   "alle Charaktere freigeschaltet."),
+	QFrame* online_page = make_page(tr("ONLINE  -  VS. 2P"),
+		tr("Both players boot their own copy of the game to the character select, all characters unlocked. "
+		   "Each player plays with their own button config."),
 		&online);
 
 	// Direct IP now, rooms (lobby server) later.
 	QHBoxLayout* tabs = new QHBoxLayout();
 	tabs->setSpacing(0);
-	QPushButton* tab_direct = new QPushButton(QStringLiteral("Direkt (IP)"), online_page);
+	QPushButton* tab_direct = new QPushButton(tr("Direct (IP)"), online_page);
 	tab_direct->setObjectName(QStringLiteral("Tab"));
 	tab_direct->setCheckable(true);
 	tab_direct->setChecked(true);
-	QPushButton* tab_rooms = new QPushButton(QStringLiteral("Räume  (demnächst)"), online_page);
+	QPushButton* tab_rooms = new QPushButton(tr("Rooms  (coming soon)"), online_page);
 	tab_rooms->setObjectName(QStringLiteral("Tab"));
 	tab_rooms->setEnabled(false);
-	tab_rooms->setToolTip(QStringLiteral("Räume über einen Lobby-Server, ohne Portfreigabe. Kommt später."));
+	tab_rooms->setToolTip(tr("Rooms on a lobby server, without port forwarding. Coming later."));
 	tabs->addWidget(tab_direct);
 	tabs->addWidget(tab_rooms);
 	tabs->addStretch(1);
@@ -202,8 +219,8 @@ RollbackLauncher::RollbackLauncher()
 
 	QHBoxLayout* delay_row = new QHBoxLayout();
 	delay_row->setSpacing(0);
-	QLabel* delay_label = new QLabel(QStringLiteral("Delay"), online_page);
-	delay_label->setMinimumWidth(110);
+	QLabel* delay_label = new QLabel(tr("Delay"), online_page);
+	delay_label->setMinimumWidth(70);
 	delay_row->addWidget(delay_label);
 	m_delay_group = new QButtonGroup(this);
 	const int saved_delay = std::clamp(Host::GetBaseIntSettingValue(SECTION, "Delay", DEFAULT_DELAY), 0, MAX_DELAY);
@@ -217,7 +234,7 @@ RollbackLauncher::RollbackLauncher()
 		m_delay_group->addButton(b, i);
 		delay_row->addWidget(b);
 	}
-	QLabel* delay_hint = new QLabel(QStringLiteral("   Frames  -  empfohlen 1, beide gleich"), online_page);
+	QLabel* delay_hint = new QLabel(tr("   frames  -  1 recommended, both the same"), online_page);
 	delay_hint->setObjectName(QStringLiteral("Hint"));
 	delay_row->addWidget(delay_hint);
 	delay_row->addStretch(1);
@@ -225,12 +242,10 @@ RollbackLauncher::RollbackLauncher()
 	online->addSpacing(6);
 
 	const int port = Host::GetBaseIntSettingValue(SECTION, "Port", DEFAULT_PORT);
-	m_host_button = make_action(QStringLiteral("HOSTEN  (SPIELER 1)"));
-	m_host_button->setToolTip(
-		QStringLiteral("Wartet auf UDP-Port %1 auf den anderen Spieler.\nDer Port muss im Router freigegeben sein.").arg(port));
+	m_host_button = make_action(tr("HOST  (PLAYER 1)"));
+	m_host_button->setToolTip(tr("Waits for the other player on UDP port %1.\nThe port must be forwarded in your router.").arg(port));
 	online->addWidget(m_host_button);
-	QLabel* host_hint = new QLabel(
-		QStringLiteral("Dem anderen Spieler die eigene öffentliche IP sagen. UDP-Port %1 im Router freigeben.").arg(port),
+	QLabel* host_hint = new QLabel(tr("Tell the other player your public IP address. Forward UDP port %1 in your router.").arg(port),
 		online_page);
 	host_hint->setObjectName(QStringLiteral("Hint"));
 	online->addWidget(host_hint);
@@ -238,40 +253,78 @@ RollbackLauncher::RollbackLauncher()
 
 	QHBoxLayout* join_row = new QHBoxLayout();
 	m_host_address = new QLineEdit(online_page);
-	m_host_address->setPlaceholderText(QStringLiteral("IP des Hosts, z. B. 203.0.113.5"));
+	m_host_address->setPlaceholderText(tr("Host IP address, e.g. 203.0.113.5"));
 	m_host_address->setText(QString::fromStdString(Host::GetBaseStringSettingValue(SECTION, "HostAddress", "")));
 	join_row->addWidget(m_host_address, 1);
-	m_join_button = make_action(QStringLiteral("BEITRETEN  (SPIELER 2)"));
+	m_join_button = make_action(tr("JOIN  (PLAYER 2)"));
 	join_row->addWidget(m_join_button);
 	online->addLayout(join_row);
 	online->addStretch(1);
 
 	// ---- Page: training ----------------------------------------------------------------------------------
 	QVBoxLayout* training = nullptr;
-	QFrame* training_page = make_page(QStringLiteral("TRAINING"),
-		QStringLiteral("Alleine üben, ohne Verbindung: Das Spiel startet bis zur Charakterauswahl im "
-					   "Practice-Modus, alle Charaktere freigeschaltet."),
+	QFrame* training_page = make_page(tr("TRAINING"),
+		tr("Practice on your own, offline: the game boots to the character select of practice mode, all "
+		   "characters unlocked, with your button config."),
 		&training);
-	m_practice_button = make_action(QStringLiteral("PRACTICE STARTEN"));
+	m_practice_button = make_action(tr("START PRACTICE"));
 	training->addWidget(m_practice_button);
 	training->addStretch(1);
 
-	// ---- Page: key config --------------------------------------------------------------------------------
-	QVBoxLayout* keys = nullptr;
-	QFrame* keys_page = make_page(QStringLiteral("TASTENBELEGUNG"),
-		QStringLiteral("Hier den eigenen Controller einrichten (Controller-Port 1). Die Belegung gilt für "
-					   "alles: Hosten, Beitreten und Training. Das Spiel ordnet deinen Controller automatisch "
-					   "Spieler 1 oder 2 zu."),
-		&keys);
-	QPushButton* key_button = make_action(QStringLiteral("CONTROLLER EINRICHTEN"));
-	keys->addWidget(key_button);
-	keys->addStretch(1);
+	// ---- Page: button config ------------------------------------------------------------------------------
+	QVBoxLayout* buttons = nullptr;
+	QFrame* buttons_page = make_page(tr("BUTTON CONFIG"),
+		tr("The game's button config: which action each PS2 button does. Set it once; it is used for "
+		   "training and online, as player 1 or player 2."),
+		&buttons);
 
-	QPushButton* menu_online = add_menu_entry(QStringLiteral("ONLINE"), online_page);
-	add_menu_entry(QStringLiteral("TRAINING"), training_page);
-	add_menu_entry(QStringLiteral("TASTENBELEGUNG"), keys_page);
+	QGridLayout* grid = new QGridLayout();
+	grid->setHorizontalSpacing(14);
+	grid->setVerticalSpacing(6);
+	for (u32 i = 0; i < FucButtons::NUM_BUTTONS; i++)
+	{
+		QLabel* name = new QLabel(tr(FucButtons::ButtonName(i)), buttons_page);
+		QComboBox* combo = new QComboBox(buttons_page);
+		for (u32 a = 0; a < FucButtons::NUM_ACTIONS; a++)
+		{
+			const QString action = tr(FucButtons::ActionName(a));
+			combo->addItem(FucButtons::IsPracticeOnly(a) ? tr("%1  (practice only)").arg(action) : action, a);
+		}
+		m_button_combos[i] = combo;
+		// Two columns: face buttons left, shoulder buttons right.
+		const int row = static_cast<int>(i % 4);
+		const int col = static_cast<int>(i / 4) * 2;
+		grid->addWidget(name, row, col);
+		grid->addWidget(combo, row, col + 1);
+		connect(combo, &QComboBox::currentIndexChanged, this, &RollbackLauncher::onButtonLayoutChanged);
+	}
+	grid->setColumnStretch(1, 1);
+	grid->setColumnStretch(3, 1);
+	buttons->addLayout(grid);
+
+	QHBoxLayout* button_actions = new QHBoxLayout();
+	QPushButton* reset_buttons = new QPushButton(tr("Reset to default"), buttons_page);
+	reset_buttons->setObjectName(QStringLiteral("Tab"));
+	button_actions->addWidget(reset_buttons);
+	button_actions->addStretch(1);
+	buttons->addLayout(button_actions);
+
+	buttons->addSpacing(8);
+	QLabel* controller_hint = new QLabel(
+		tr("Your controller: which of its buttons is which PS2 button (PCSX2 controller settings, port 1)."), buttons_page);
+	controller_hint->setObjectName(QStringLiteral("Hint"));
+	controller_hint->setWordWrap(true);
+	buttons->addWidget(controller_hint);
+	QPushButton* key_button = make_action(tr("MAP CONTROLLER"));
+	buttons->addWidget(key_button);
+	buttons->addStretch(1);
+	loadButtonLayout();
+
+	QPushButton* menu_online = add_menu_entry(tr("ONLINE"), online_page);
+	add_menu_entry(tr("TRAINING"), training_page);
+	add_menu_entry(tr("BUTTON CONFIG"), buttons_page);
 	menu->addStretch(1);
-	QPushButton* menu_quit = add_menu_entry(QStringLiteral("BEENDEN"), nullptr);
+	QPushButton* menu_quit = add_menu_entry(tr("QUIT"), nullptr);
 	menu_quit->setCheckable(false);
 	menu_online->setChecked(true);
 	m_pages->setCurrentIndex(0);
@@ -289,7 +342,7 @@ RollbackLauncher::RollbackLauncher()
 	footer->addWidget(m_bios_status);
 	footer->addWidget(m_game_status);
 	footer->addStretch(1);
-	QLabel* footer_hint = new QLabel(QStringLiteral("Vollbild: Alt+Enter   -   Spiel beenden: Spielfenster schließen"), this);
+	QLabel* footer_hint = new QLabel(tr("Fullscreen: Alt+Enter   -   End a game: close the game window"), this);
 	footer_hint->setObjectName(QStringLiteral("Hint"));
 	footer->addWidget(footer_hint);
 	root->addLayout(footer);
@@ -299,6 +352,11 @@ RollbackLauncher::RollbackLauncher()
 	connect(m_host_address, &QLineEdit::returnPressed, this, &RollbackLauncher::onJoinClicked);
 	connect(m_practice_button, &QPushButton::clicked, this, &RollbackLauncher::onPracticeClicked);
 	connect(key_button, &QPushButton::clicked, this, &RollbackLauncher::onKeyConfigClicked);
+	connect(reset_buttons, &QPushButton::clicked, this, [this]() {
+		FucButtons::SetLocal(FucButtons::Default());
+		loadButtonLayout();
+		onButtonLayoutChanged();
+	});
 	connect(menu_quit, &QPushButton::clicked, this, &QWidget::close);
 
 	// Out of the way while a game runs, back when it has ended.
@@ -306,6 +364,26 @@ RollbackLauncher::RollbackLauncher()
 	connect(g_emu_thread, &EmuThread::onVMStopped, this, &RollbackLauncher::showAgain);
 
 	refreshStatus();
+}
+
+void RollbackLauncher::loadButtonLayout()
+{
+	const FucButtons::Layout& layout = FucButtons::GetLocal();
+	for (u32 i = 0; i < FucButtons::NUM_BUTTONS; i++)
+	{
+		QSignalBlocker block(m_button_combos[i]);
+		m_button_combos[i]->setCurrentIndex(m_button_combos[i]->findData(static_cast<u32>(layout[i])));
+	}
+}
+
+void RollbackLauncher::onButtonLayoutChanged()
+{
+	FucButtons::Layout layout;
+	for (u32 i = 0; i < FucButtons::NUM_BUTTONS; i++)
+		layout[i] = static_cast<u8>(m_button_combos[i]->currentData().toUInt());
+	FucButtons::SetLocal(layout);
+	Host::SetBaseStringSettingValue(SECTION, "ButtonLayout", FucButtons::ToString(layout).c_str());
+	Host::CommitBaseSettingChanges();
 }
 
 int RollbackLauncher::selectedDelay() const
@@ -347,8 +425,8 @@ bool RollbackLauncher::refreshStatus()
 
 	if (m_bios_file.empty())
 	{
-		m_bios_status->setText(QStringLiteral("<span style='color:#ff6b6b'>&#9679;</span> BIOS fehlt - eigene BIOS-Datei "
-											  "(4 MB) in den Ordner \"bios\" kopieren"));
+		m_bios_status->setText(QStringLiteral("<span style='color:#ff6b6b'>&#9679;</span> ") +
+							   tr("BIOS missing - copy your own BIOS file (4 MB) into the \"bios\" folder"));
 	}
 	else
 	{
@@ -377,12 +455,12 @@ bool RollbackLauncher::refreshStatus()
 		const QStringList words = QString::fromStdString(description).split(QLatin1Char(' '), Qt::SkipEmptyParts);
 		const QString short_description = words.mid(0, 2).join(QLatin1Char(' '));
 		m_bios_status->setText(differs ?
-								   QStringLiteral("<span style='color:#f0b429'>&#9679;</span> BIOS %1 - andere Version als "
-												  "beim Organisator, online kann das Spiel abweichen")
-									   .arg(short_description.toHtmlEscaped()) :
+								   QStringLiteral("<span style='color:#f0b429'>&#9679;</span> ") +
+									   tr("BIOS %1 - another version than the organizer's, online games may desync")
+										   .arg(short_description.toHtmlEscaped()) :
 								   QStringLiteral("<span style='color:#6fd08c'>&#9679;</span> BIOS %1").arg(short_description.toHtmlEscaped()));
 		m_bios_status->setToolTip(
-			differs ? QStringLiteral("%1\nOrganisator: %2").arg(QString::fromStdString(m_bios_file), QString::fromStdString(reference)) :
+			differs ? tr("%1\nOrganizer: %2").arg(QString::fromStdString(m_bios_file), QString::fromStdString(reference)) :
 					  QString::fromStdString(m_bios_file));
 	}
 
@@ -407,9 +485,9 @@ bool RollbackLauncher::refreshStatus()
 			break;
 	}
 	m_game_status->setText(m_game_path.empty() ?
-							   QStringLiteral("<span style='color:#ff6b6b'>&#9679;</span> Spiel fehlt - eigenes Abbild "
-											  "(.iso/.chd/.cso/.cue) in den Ordner \"game\" kopieren") :
-							   QStringLiteral("<span style='color:#6fd08c'>&#9679;</span> Spiel %1")
+							   QStringLiteral("<span style='color:#ff6b6b'>&#9679;</span> ") +
+								   tr("Game missing - copy your own disc image (.iso/.chd/.cso/.cue) into the \"game\" folder") :
+							   QStringLiteral("<span style='color:#6fd08c'>&#9679;</span> ") + tr("Game %1")
 								   .arg(QString::fromStdString(std::string(Path::GetFileName(m_game_path))).toHtmlEscaped()));
 
 	return !m_bios_file.empty() && !m_game_path.empty();
@@ -447,7 +525,7 @@ void RollbackLauncher::onJoinClicked()
 	static const QRegularExpression valid(QStringLiteral("^[0-9A-Fa-f.:\\[\\]]+$"));
 	if (address.empty() || !valid.match(QString::fromStdString(address)).hasMatch())
 	{
-		QMessageBox::warning(this, windowTitle(), QStringLiteral("Bitte die IP-Adresse des Hosts eingeben, z. B. 203.0.113.5"));
+		QMessageBox::warning(this, windowTitle(), tr("Please enter the host's IP address, e.g. 203.0.113.5"));
 		m_host_address->setFocus();
 		return;
 	}
@@ -475,7 +553,7 @@ void RollbackLauncher::boot(const std::string& netplay_spec, const char* shortcu
 {
 	if (!refreshStatus())
 	{
-		QMessageBox::warning(this, windowTitle(), QStringLiteral("BIOS oder Spiel fehlt (siehe oben)."));
+		QMessageBox::warning(this, windowTitle(), tr("BIOS or game missing (see below)."));
 		return;
 	}
 	if (QtHost::IsVMValid())

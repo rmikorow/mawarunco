@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "Rollback/BootShortcut.h"
+#include "Rollback/FucButtons.h"
+#include "Rollback/Netplay.h"
 #include "Rollback/Rollback.h"
 
 #include "GS/GS.h"
@@ -313,6 +315,14 @@ void BootShortcut::Begin()
 
 void BootShortcut::Finish()
 {
+	// Offline: the local player's in-game button layout for player 1 (player 2 keeps the default). In
+	// netplay both peers write both layouts at the start of the session instead (Netplay handshake).
+	if (!Netplay::IsActive())
+	{
+		FucButtons::Write(0, FucButtons::GetLocal());
+		Console.WriteLn(fmt::format("Boot shortcut: P1 button layout {}", FucButtons::ToString(FucButtons::GetLocal())));
+	}
+
 	ApplyFlags(false);
 	Rollback::EndInputInjection();
 	s_running = false;
