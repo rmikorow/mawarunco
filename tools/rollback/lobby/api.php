@@ -2,10 +2,12 @@
 // Mawarunco lobby: a list of open netplay rooms. The match itself never goes through this server: the
 // joiner gets the host's IP address and port and connects directly (UDP), as with a typed-in address.
 //
-//   GET  ?action=list&ver=<build>                          open rooms of this build (never IP addresses)
+//   GET  ?action=list&ver=<build>                          open rooms of this build (never IP addresses),
+//                                                          players online, matches running
 //   POST action=create  ver, name, delay, rollback, port, [code], [country]   -> id, token
 //   POST action=heartbeat  id, token                       keeps the room listed -> status, guest
 //   POST action=join    id, ver, name, [code]              -> host address, port, delay, rollback
+//   POST action=reopen  id, token                          the joiner did not connect: list the room again
 //   POST action=close   id, token
 //
 // Tables: schema.sql (created once with the database's main login; this script only needs a login that
@@ -40,14 +42,37 @@ const LIMITS = [
     'list' => [120, 60],
     'create' => [10, 600],
     'heartbeat' => [60, 60],
-    'join' => [30, 600],
+    'join' => [15, 600],        // each join reveals one host address: keep harvesting slow
     'join_fail' => [10, 600],   // wrong room codes
+    'reopen' => [20, 600],
     'close' => [20, 60],
 ];
+
+// No PHP messages in replies (they can contain paths or database details), whatever the hosting's default.
+ini_set('display_errors', '0');
+set_exception_handler(static function (Throwable $e): void {
+    error_log('mawarunco lobby: ' . get_class($e));
+    http_response_code(500);
+    echo json_encode(['ok' => false, 'error' => 'server error', 'protocol' => PROTOCOL]);
+});
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: no-referrer');
+header("Content-Security-Policy: default-src 'none'; frame-ancestors 'none'");
+header('Strict-Transport-Security: max-age=31536000');
+
+// The lobby hands out IP addresses: refuse plain HTTP outright (the launcher only uses HTTPS). A test
+// server on the same PC (127.0.0.1) may use plain HTTP, nothing leaves the machine there.
+$https = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off') ||
+    ((string) ($_SERVER['SERVER_PORT'] ?? '') === '443');
+$local = in_array((string) ($_SERVER['REMOTE_ADDR'] ?? ''), ['127.0.0.1', '::1'], true);
+if (!$https && !$local) {
+    http_response_code(403);
+    echo json_encode(['ok' => false, 'error' => 'HTTPS only', 'protocol' => PROTOCOL]);
+    exit;
+}
 
 function respond(int $status, array $body): never
 {
@@ -252,7 +277,16 @@ switch ($action) {
         }
         $playing = $pdo->prepare('SELECT COUNT(*) FROM mwr_rooms WHERE ver = ? AND status = ?');
         $playing->execute([$ver, 'playing']);
-        respond(200, ['ok' => true, 'rooms' => $rooms, 'playing' => (int) $playing->fetchColumn()]);
+        $matches = (int) $playing->fetchColumn();
+        // Players online (all versions), from data the lobby keeps anyway: launchers that looked at the room
+        // list in the last minute (one rate-limit entry each), hosts waiting in an open room, two players per
+        // running match. Players behind one IP address count once.
+        $browsing = $pdo->prepare('SELECT COUNT(*) FROM mwr_limits WHERE bucket = ? AND window_start > ?');
+        $browsing->execute(['list', $now - 70]);
+        $open = (int) $pdo->query("SELECT COUNT(*) FROM mwr_rooms WHERE status = 'open'")->fetchColumn();
+        $all_matches = (int) $pdo->query("SELECT COUNT(*) FROM mwr_rooms WHERE status = 'playing'")->fetchColumn();
+        $online = (int) $browsing->fetchColumn() + $open + 2 * $all_matches;
+        respond(200, ['ok' => true, 'rooms' => $rooms, 'playing' => $matches, 'online' => $online]);
 
     case 'create':
         $ver = param('ver', VER_PATTERN);
@@ -318,6 +352,13 @@ switch ($action) {
         }
         respond(200, ['ok' => true, 'address' => $address, 'port' => (int) $room['host_port'],
             'delay' => (int) $room['delay_frames'], 'rollback' => (int) $room['rollback_frames'], 'host' => $room['host_name']]);
+
+    case 'reopen':
+        // The host's game saw no connection from the joiner: back into the list for the next player.
+        $room = owned_room($pdo);
+        $pdo->prepare('UPDATE mwr_rooms SET status = ?, guest_name = NULL, last_seen = ? WHERE id = ? AND status = ?')
+            ->execute(['open', $now, $room['id'], 'playing']);
+        respond(200, ['ok' => true]);
 
     case 'close':
         $room = owned_room($pdo);
