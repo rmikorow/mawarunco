@@ -9,7 +9,7 @@ address. One hosts (player 1), the other joins (player 2).
 1. One-time setup
 -----------------
 
-Easiest: run "Mawarunco-Setup-<date>.exe". It installs without admin
+Easiest: run "Mawarunco-Setup-v<version>.exe". It installs without admin
 rights, asks for your BIOS and your disc image, and creates shortcuts.
 Running a newer setup later updates the program and keeps your settings.
 With the zip package instead, do a) and b) below (or choose both files in
@@ -27,7 +27,7 @@ c) HOST only: set up port forwarding in your router:
    The joining player needs no port forwarding.
 
 The first time you play online, Windows Firewall asks whether PCSX2 may use
-the network: choose "Allow" (private and public networks).
+the network (for Mawarunco): choose "Allow" (private and public networks).
 
 Windows SmartScreen may warn on the first start because the files are not
 signed ("More info" > "Run anyway").
@@ -36,7 +36,7 @@ signed ("More info" > "Run anyway").
 2. Starting
 -----------
 
-Run "pcsx2-qtx64-clang.exe". The start window opens:
+Run "Mawarunco.exe". The start window opens:
 
 - BUTTON CONFIG:
     The game's button config, like its own CONTROLLER SETTINGS menu: click

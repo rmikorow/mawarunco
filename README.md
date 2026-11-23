@@ -40,7 +40,7 @@ the game.
 
 ## Getting started
 
-1. Download **`Mawarunco-Setup-<date>.exe`** from the
+1. Download **`Mawarunco-Setup-v<version>.exe`** from the
    [latest release](https://github.com/rmikorow/mawarunco/releases/latest) and
    run it. Choose your PS2 BIOS file and your disc image of Fate/unlimited
    codes.
@@ -119,7 +119,8 @@ Same as PCSX2, plus a Rust toolchain:
 4. Package, patch and installer (Inno Setup 6 needed for the installer):
    `tools/rollback/make-netplay-package.ps1 -ReferenceBios <bios> -Update -Installer`.
 
-The command line also works for testing:
+The build is named `pcsx2-qtx64-clang.exe` like upstream; the package script
+names it `Mawarunco.exe` for players. The command line also works for testing:
 
 ```
 pcsx2-qtx64-clang.exe -batch -netplay "host=7000,delay=1,rollback=2,boot" -- game.iso

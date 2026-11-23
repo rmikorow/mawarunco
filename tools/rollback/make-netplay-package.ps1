@@ -2,7 +2,7 @@
 #
 #   .\tools\rollback\make-netplay-package.ps1 -ReferenceBios <bios .bin>
 #
-# Output: dist\Mawarunco-<date>.zip, built in dist\.staging\ (private to this script, deleted and
+# Output: dist\Mawarunco-v<version>.zip (version from the git tag of HEAD), built in dist\.staging\ (private to this script, deleted and
 # recreated on every run; to test the package, unzip it somewhere else). The package contains the emulator, sanitized
 # settings with the start window switched on, the guide, licenses and the fork's source patch. It never
 # contains a BIOS or a disc image; the reference BIOS is only used to compute a hash for the start window.
@@ -18,7 +18,7 @@ param(
     # Also build a patch for players who already have the package: program, guide and source only, no
     # settings (their controller mapping, button config, delay and host address stay).
     [switch]$Update,
-    # Also build the installer dist\Mawarunco-Setup-<date>.exe (Inno Setup 6). ISCC.exe comes from
+    # Also build the installer dist\Mawarunco-Setup-v<version>.exe (Inno Setup 6). ISCC.exe comes from
     # -IsccPath, the MAWARUNCO_ISCC environment variable, the PATH or the usual install folders.
     [switch]$Installer,
     [string]$IsccPath = ''
@@ -52,6 +52,16 @@ $dist = Join-Path $repo 'dist'
 $staging = Join-Path $dist '.staging'
 $out = Join-Path $staging 'Mawarunco'
 $template = Join-Path $PSScriptRoot 'package'
+# The build is named like upstream (pcsx2-qtx64-clang.exe); players get Mawarunco.exe. Nothing in the
+# program depends on its file name.
+$exeName = 'Mawarunco.exe'
+
+# Version for the file names: the release tag on HEAD (v0.2.2 -> 0.2.2), otherwise git describe
+# (0.2.1-3-g1234abcd), so a test build never looks like a release.
+Push-Location $repo
+try { $version = ((git describe --tags --match 'v[0-9]*' HEAD) | Out-String).Trim() -replace '^v', '' }
+finally { Pop-Location }
+if (-not $version) { throw 'No version tag (v<major>.<minor>.<patch>) found for HEAD.' }
 
 if (-not (Test-Path (Join-Path $bin 'pcsx2-qtx64-clang.exe'))) { throw 'Release build missing (bin\pcsx2-qtx64-clang.exe).' }
 if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
@@ -59,8 +69,9 @@ New-Item -ItemType Directory -Force $out | Out-Null
 
 # ---- Emulator files (no debug symbols, import libraries or the Devel build) -------------------------
 Get-ChildItem $bin -File | Where-Object {
-    ($_.Extension -in '.dll', '.conf') -or ($_.Name -in 'pcsx2-qtx64-clang.exe', 'portable.txt')
+    ($_.Extension -in '.dll', '.conf') -or ($_.Name -eq 'portable.txt')
 } | Copy-Item -Destination $out
+Copy-Item (Join-Path $bin 'pcsx2-qtx64-clang.exe') (Join-Path $out $exeName)
 foreach ($dir in 'QtPlugins', 'D3D12', 'resources', 'translations', 'docs') {
     Copy-Item (Join-Path $bin $dir) -Destination (Join-Path $out $dir) -Recurse
 }
@@ -174,9 +185,9 @@ finally { Pop-Location }
 # ---- Zip ----------------------------------------------------------------------------------------------
 # Only the newest package (and patch) stays in dist, so it is always clear which one to send. Only zip
 # files and their checksum files are removed, never a folder (dist may hold a player's unpacked copy).
-Get-ChildItem $dist -File | Where-Object { $_.Name -match '^(FUC-Netplay|Mawarunco)-((Patch-)?\d{8}\.zip|Setup-[\d.]+\.exe)(\.sha256\.txt)?$' } |
+Get-ChildItem $dist -File | Where-Object { $_.Name -match '^(FUC-Netplay|Mawarunco)-((Patch-)?(\d{8}|v[\w.-]+)\.zip|Setup-(v[\w.-]+|[\d.]+)\.exe)(\.sha256\.txt)?$' } |
     Remove-Item -Force
-$zip = Join-Path $dist ("Mawarunco-{0}.zip" -f (Get-Date -Format 'yyyyMMdd'))
+$zip = Join-Path $dist "Mawarunco-v$version.zip"
 Compress-Archive -Path (Join-Path $out '*') -DestinationPath $zip -CompressionLevel Optimal
 $size = (Get-Item $zip).Length / 1MB
 # SHA-256 next to the zip, so players can check that their copy is the one the organizer built.
@@ -189,17 +200,19 @@ Write-Host "SHA-256: $hash"
 if ($Update) {
     $upd = Join-Path $staging 'update'
     New-Item -ItemType Directory -Force (Join-Path $upd 'source') | Out-Null
-    Copy-Item (Join-Path $out 'pcsx2-qtx64-clang.exe'), (Join-Path $out 'README.txt') -Destination $upd
+    Copy-Item (Join-Path $out $exeName), (Join-Path $out 'README.txt') -Destination $upd
     Copy-Item (Join-Path $out 'source\*') -Destination (Join-Path $upd 'source')
     @(
         'Patch for an existing Mawarunco (Fate/unlimited codes netplay) folder.',
         '',
         'Close the program, then copy the contents of this zip into your folder and replace the files.',
         'Your settings (controller, button config, delay, host address) stay as they are.',
+        'The program is now called Mawarunco.exe. You can delete the old pcsx2-qtx64-clang.exe and must',
+        'update shortcuts you made to it. Windows Firewall asks once more on the first online game: "Allow".',
         'Old files from earlier versions that are no longer needed: Host.bat, Join.bat, Training.bat,',
         'Einstellungen.bat, netplay.ps1, start.p2s, LIESMICH.txt (you can delete them).'
     ) | Set-Content (Join-Path $upd 'PATCH_README.txt') -Encoding ascii
-    $uzip = Join-Path $dist ("Mawarunco-Patch-{0}.zip" -f (Get-Date -Format 'yyyyMMdd'))
+    $uzip = Join-Path $dist "Mawarunco-Patch-v$version.zip"
     if (Test-Path $uzip) { Remove-Item $uzip -Force }
     Compress-Archive -Path (Join-Path $upd '*') -DestinationPath $uzip -CompressionLevel Optimal
     $uhash = (Get-FileHash $uzip -Algorithm SHA256).Hash
@@ -216,11 +229,10 @@ if ($Installer) {
             Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
     }
     if (-not $IsccPath) { throw 'Inno Setup compiler (ISCC.exe) not found, pass -IsccPath.' }
-    $version = Get-Date -Format 'yyyy.MM.dd'
     $iss = Join-Path $PSScriptRoot 'installer\mawarunco.iss'
     & $IsccPath /Q "/DSourceDir=$out" "/DOutputDir=$dist" "/DAppVersion=$version" "/DRepoDir=$repo" $iss
     if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)." }
-    $setup = Join-Path $dist "Mawarunco-Setup-$version.exe"
+    $setup = Join-Path $dist "Mawarunco-Setup-v$version.exe"
     $shash = (Get-FileHash $setup -Algorithm SHA256).Hash
     "$shash  $(Split-Path $setup -Leaf)" | Set-Content "$setup.sha256.txt" -Encoding ascii
     Write-Host ("Setup:   {0} ({1:N0} MB)" -f $setup, ((Get-Item $setup).Length / 1MB))

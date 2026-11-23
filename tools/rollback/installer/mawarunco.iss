@@ -1,7 +1,7 @@
 ; Installer for Mawarunco, the Fate/unlimited codes rollback netplay build of PCSX2 (Inno Setup 6).
 ;
 ; Built by tools\rollback\make-netplay-package.ps1 -Installer, which passes:
-;   /DSourceDir=<staged package folder>  /DOutputDir=<dist>  /DAppVersion=<yyyy.MM.dd>  /DRepoDir=<repo root>
+;   /DSourceDir=<staged package folder>  /DOutputDir=<dist>  /DAppVersion=<version, e.g. 0.2.2>  /DRepoDir=<repo root>
 ;
 ; Installs per user (no admin rights) to %LOCALAPPDATA%\Programs\Mawarunco. A custom page asks for the
 ; player's own BIOS (copied into the "bios" folder) and disc image (only its path is kept; 4 GB are not
@@ -25,9 +25,9 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputDir}
-OutputBaseFilename=Mawarunco-Setup-{#AppVersion}
+OutputBaseFilename=Mawarunco-Setup-v{#AppVersion}
 SetupIconFile={#RepoDir}\pcsx2\windows\AppIcon.ico
-UninstallDisplayIcon={app}\pcsx2-qtx64-clang.exe
+UninstallDisplayIcon={app}\Mawarunco.exe
 LicenseFile={#RepoDir}\tools\rollback\installer\LICENSE-NOTICE.txt
 Compression=lzma2/max
 SolidCompression=yes
@@ -48,9 +48,13 @@ Source: "{#SourceDir}\memcards\*"; DestDir: "{app}\memcards"; Flags: onlyifdoesn
 Source: "{#SourceDir}\sstates\*"; DestDir: "{app}\sstates"; Flags: onlyifdoesntexist
 Source: "{#SourceDir}\logs\*"; DestDir: "{app}\logs"; Flags: onlyifdoesntexist
 
+[InstallDelete]
+; Up to v0.2.1 the program was called pcsx2-qtx64-clang.exe; the shortcuts now point to Mawarunco.exe.
+Type: files; Name: "{app}\pcsx2-qtx64-clang.exe"
+
 [Icons]
-Name: "{userprograms}\Mawarunco"; Filename: "{app}\pcsx2-qtx64-clang.exe"; WorkingDir: "{app}"
-Name: "{userdesktop}\Mawarunco"; Filename: "{app}\pcsx2-qtx64-clang.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{userprograms}\Mawarunco"; Filename: "{app}\Mawarunco.exe"; WorkingDir: "{app}"
+Name: "{userdesktop}\Mawarunco"; Filename: "{app}\Mawarunco.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [UninstallDelete]
 ; Files the program or the installer created. The "game", "sstates" and "memcards" folders stay: players may
@@ -69,7 +73,7 @@ Type: filesandordirs; Name: "{app}\cheats"
 Type: filesandordirs; Name: "{app}\patches"
 
 [Run]
-Filename: "{app}\pcsx2-qtx64-clang.exe"; WorkingDir: "{app}"; Description: "Start Mawarunco"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Mawarunco.exe"; WorkingDir: "{app}"; Description: "Start Mawarunco"; Flags: nowait postinstall skipifsilent
 
 [Code]
 const
