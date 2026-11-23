@@ -1,2 +1,6 @@
+# Filled-in configuration (database password): never commit, in any name variant.
 config.php
+config.php.*
+config*.local.php
 mawarunco-lobby-config.php
+mawarunco-lobby-config.php.*
