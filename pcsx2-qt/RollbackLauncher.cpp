@@ -33,6 +33,7 @@
 #include <QtGui/QHideEvent>
 #include <QtGui/QRegularExpressionValidator>
 #include <QtGui/QKeyEvent>
+#include <QtGui/QScreen>
 #include <QtCore/QSignalBlocker>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QButtonGroup>
@@ -60,6 +61,17 @@ static constexpr int DEFAULT_DELAY = 1;
 static constexpr int DEFAULT_ROLLBACK = 2;
 static constexpr int MAX_DELAY = 3;
 static constexpr s64 BIOS_SIZE = 4 * 1024 * 1024;
+
+// Common 4:3 resolutions for the display page (the game is 4:3).
+static constexpr std::array<std::pair<int, int>, 12> RESOLUTIONS = {{{640, 480}, {800, 600}, {960, 720}, {1024, 768},
+	{1280, 960}, {1400, 1050}, {1440, 1080}, {1600, 1200}, {1920, 1440}, {2048, 1536}, {2560, 1920}, {2880, 2160}}};
+static constexpr int DEFAULT_RESOLUTION = 4; // 1280x960
+
+/// Internal resolution multiplier that renders at least as many lines as the chosen height (PS2: 480).
+static int UpscaleForHeight(int height)
+{
+	return std::max(1, (height + 479) / 480);
+}
 
 bool RollbackLauncher::IsEnabled()
 {
@@ -401,9 +413,76 @@ RollbackLauncher::RollbackLauncher()
 	connect(m_right_hold_timer, &QTimer::timeout, this, &RollbackLauncher::onRightHeld);
 	loadButtonLayout();
 
+	// ---- Page: display ------------------------------------------------------------------------------------
+	QVBoxLayout* display = nullptr;
+	QFrame* display_page = make_page(tr("DISPLAY"),
+		tr("Resolution of the game picture (4:3, like the original). The game is rendered at least this sharp; "
+		   "in a window it gets exactly this size, in fullscreen it fills the screen height."),
+		&display);
+	QHBoxLayout* res_row = new QHBoxLayout();
+	res_row->setSpacing(0);
+	QLabel* res_label = new QLabel(tr("Resolution"), display_page);
+	res_label->setMinimumWidth(110);
+	res_row->addWidget(res_label);
+	m_resolution = new QComboBox(display_page);
+	const std::string saved_res = Host::GetBaseStringSettingValue(SECTION, "Resolution", "");
+	for (size_t i = 0; i < RESOLUTIONS.size(); i++)
+	{
+		const auto [w, h] = RESOLUTIONS[i];
+		m_resolution->addItem(QStringLiteral("%1 x %2").arg(w).arg(h), static_cast<int>(i));
+		if (saved_res == fmt::format("{}x{}", w, h))
+			m_resolution->setCurrentIndex(static_cast<int>(i));
+	}
+	if (saved_res.empty())
+		m_resolution->setCurrentIndex(DEFAULT_RESOLUTION);
+	m_resolution->setMinimumWidth(180);
+	res_row->addWidget(m_resolution);
+	res_row->addStretch(1);
+	display->addLayout(res_row);
+
+	QHBoxLayout* mode_row = new QHBoxLayout();
+	mode_row->setSpacing(0);
+	QLabel* mode_label = new QLabel(tr("Mode"), display_page);
+	mode_label->setMinimumWidth(110);
+	mode_row->addWidget(mode_label);
+	QButtonGroup* mode_group = new QButtonGroup(this);
+	m_mode_window = new QPushButton(tr("Window"), display_page);
+	m_mode_fullscreen = new QPushButton(tr("Fullscreen"), display_page);
+	for (QPushButton* b : {m_mode_window, m_mode_fullscreen})
+	{
+		b->setObjectName(QStringLiteral("Delay"));
+		b->setCheckable(true);
+		b->setMinimumWidth(110);
+		mode_group->addButton(b);
+		mode_row->addWidget(b);
+	}
+	(Host::GetBaseBoolSettingValue(SECTION, "Fullscreen", false) ? m_mode_fullscreen : m_mode_window)->setChecked(true);
+	mode_row->addStretch(1);
+	display->addLayout(mode_row);
+
+	m_display_info = new QLabel(display_page);
+	m_display_info->setObjectName(QStringLiteral("Hint"));
+	display->addWidget(m_display_info);
+	display->addStretch(1);
+	auto update_display_info = [this]() {
+		const auto [w, h] = RESOLUTIONS[static_cast<size_t>(m_resolution->currentData().toInt())];
+		const int scale = UpscaleForHeight(h);
+		m_display_info->setText(tr("Rendered at %1x internal resolution (%2 x %3).   Alt+Enter switches window/fullscreen in game.")
+									.arg(scale)
+									.arg(640 * scale)
+									.arg(480 * scale));
+		Host::SetBaseStringSettingValue(SECTION, "Resolution", fmt::format("{}x{}", w, h).c_str());
+		Host::SetBaseBoolSettingValue(SECTION, "Fullscreen", m_mode_fullscreen->isChecked());
+		Host::CommitBaseSettingChanges();
+	};
+	connect(m_resolution, &QComboBox::currentIndexChanged, this, update_display_info);
+	connect(mode_group, &QButtonGroup::buttonClicked, this, update_display_info);
+	update_display_info();
+
 	QPushButton* menu_online = add_menu_entry(tr("ONLINE"), online_page);
 	add_menu_entry(tr("TRAINING"), training_page);
 	add_menu_entry(tr("BUTTON CONFIG"), buttons_page);
+	add_menu_entry(tr("DISPLAY"), display_page);
 	menu->addStretch(1);
 	QPushButton* menu_quit = add_menu_entry(tr("QUIT"), nullptr);
 	menu_quit->setCheckable(false);
@@ -441,6 +520,7 @@ RollbackLauncher::RollbackLauncher()
 
 	// Out of the way while a game runs, back when it has ended.
 	connect(g_emu_thread, &EmuThread::onVMStarted, this, &QWidget::hide);
+	connect(g_emu_thread, &EmuThread::onVMStarted, this, &RollbackLauncher::applyWindowSize);
 	connect(g_emu_thread, &EmuThread::onVMStopped, this, &RollbackLauncher::showAgain);
 
 	refreshStatus();
@@ -711,6 +791,29 @@ void RollbackLauncher::hideEvent(QHideEvent* event)
 	QWidget::hideEvent(event);
 }
 
+void RollbackLauncher::applyWindowSize()
+{
+	// Window mode: the game window gets the chosen size in screen pixels, or the largest 4:3 size that fits
+	// the screen's work area (minus room for the title bar).
+	if (m_window_size.isEmpty())
+		return;
+	int w = m_window_size.width();
+	int h = m_window_size.height();
+	if (const QScreen* screen = this->screen())
+	{
+		const QRect area = screen->availableGeometry();
+		const qreal dpr = screen->devicePixelRatio();
+		const int max_w = static_cast<int>(area.width() * dpr);
+		const int max_h = static_cast<int>((area.height() - 40) * dpr);
+		if (w > max_w || h > max_h)
+		{
+			h = std::min(max_h, max_w * 3 / 4);
+			w = h * 4 / 3;
+		}
+	}
+	emit g_emu_thread->onResizeRenderWindowRequested(w, h);
+}
+
 int RollbackLauncher::selectedDelay() const
 {
 	const int id = m_delay_group->checkedId();
@@ -896,6 +999,13 @@ void RollbackLauncher::boot(const std::string& netplay_spec, const char* shortcu
 	Host::SetBaseStringSettingValue("Filenames", "BIOS", m_bios_file.c_str());
 	Host::SetBaseStringSettingValue("Pad1", "Type", "DualShock2");
 	Host::SetBaseStringSettingValue("Pad2", "Type", "DualShock2");
+	// Display: 4:3, internal resolution for the chosen height, window or fullscreen.
+	const auto [res_w, res_h] = RESOLUTIONS[static_cast<size_t>(m_resolution->currentData().toInt())];
+	const bool fullscreen = m_mode_fullscreen->isChecked();
+	Host::SetBaseStringSettingValue("EmuCore/GS", "AspectRatio", "4:3");
+	Host::SetBaseFloatSettingValue("EmuCore/GS", "upscale_multiplier", static_cast<float>(UpscaleForHeight(res_h)));
+	Host::SetBaseBoolSettingValue("UI", "StartFullscreen", fullscreen);
+	m_window_size = fullscreen ? QSize() : QSize(res_w, res_h);
 	Host::SetBaseBoolSettingValue("UI", "RenderToSeparateWindow", true);
 	Host::SetBaseBoolSettingValue("UI", "HideMainWindowWhenRunning", true);
 	Host::CommitBaseSettingChanges();
@@ -924,6 +1034,7 @@ void RollbackLauncher::boot(const std::string& netplay_spec, const char* shortcu
 
 	auto params = std::make_shared<VMBootParameters>();
 	params->filename = m_game_path;
+	params->fullscreen = fullscreen;
 	g_emu_thread->startVM(std::move(params));
 }
 

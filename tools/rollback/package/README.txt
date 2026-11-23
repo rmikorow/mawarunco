@@ -55,6 +55,11 @@ Run "pcsx2-qtx64-clang.exe". The start window opens:
 
 - TRAINING: practice on your own, offline.
 
+- DISPLAY: resolution (common 4:3 sizes, 640 x 480 to 2880 x 2160) and
+  window or fullscreen. The game is rendered at least as sharp as the
+  chosen resolution; in a window it gets exactly that size (or the largest
+  4:3 size that fits your screen).
+
 The game boots automatically at high speed to the character select
 (online: "Vs. 2P", training: "Practice"), all characters unlocked. This
 takes a few seconds, without sound. Online, it then waits for the

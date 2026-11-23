@@ -7,6 +7,7 @@
 #include "pcsx2/Rollback/FucButtons.h"
 
 #include <QtCore/QPointer>
+#include <QtCore/QSize>
 #include <QtGui/QFont>
 #include <QtWidgets/QWidget>
 
@@ -55,6 +56,7 @@ private Q_SLOTS:
 	void onKeyConfigClicked();
 	void onBindingInput(InputBindingKey key, float value);
 	void onRightHeld();
+	void applyWindowSize();
 
 private:
 	/// Finds BIOS and disc image and updates the status lines. Returns true if both are there.
@@ -80,6 +82,12 @@ private:
 	QButtonGroup* m_delay_group = nullptr; // id = delay in frames
 	QLineEdit* m_host_address = nullptr;
 	QLineEdit* m_player_name = nullptr;
+	// Display page.
+	QComboBox* m_resolution = nullptr;
+	QPushButton* m_mode_window = nullptr;
+	QPushButton* m_mode_fullscreen = nullptr;
+	QLabel* m_display_info = nullptr;
+	QSize m_window_size; // game window size for the running game, empty = fullscreen
 	QPushButton* m_host_button = nullptr;
 	QPushButton* m_join_button = nullptr;
 	QPushButton* m_practice_button = nullptr;
