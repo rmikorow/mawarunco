@@ -1,0 +1,5 @@
+# Only api.php is served; the configuration and everything else stay private.
+Options -Indexes
+<FilesMatch "^(?!api\.php$).+">
+    Require all denied
+</FilesMatch>
