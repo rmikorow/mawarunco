@@ -44,8 +44,9 @@ Run "pcsx2-qtx64-clang.exe". The start window opens:
     controller is usually detected automatically.
 
 - ONLINE:
-    Name: your player name (up to 12 characters), shown above your health
-    bar in the character select and the fight, for both players.
+    Name: your player name (up to 20 characters), shown above your health
+    bar in the character select and the fight together with your wins,
+    e.g. "MAWARU / 2WINS". Long names are drawn narrower.
     Delay: input delay, 1 frame recommended. Both players should pick the
     same value. A higher value helps against rollback stutter on high ping.
     Host: click "HOST (PLAYER 1)" and tell the other player your public IP

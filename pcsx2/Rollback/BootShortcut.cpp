@@ -90,6 +90,7 @@ namespace BootShortcut
 	/// Built-in script by name, empty if the name is not a built-in one.
 	static std::string BuiltinScript(std::string_view name);
 
+	static FucNames::Name s_test_name2 = {}; // tests: player 2's name for the name= step
 	static std::optional<Script> s_pending;
 	static bool s_cards_off = false; // from the request until the VM shuts down
 	static Script s_script;
@@ -168,6 +169,12 @@ bool BootShortcut::Parse(std::string_view text, Script* out, Error* error)
 		else if (token == "shot")
 		{
 			step.kind = StepKind::Shot;
+		}
+		else if (token.starts_with("name2="))
+		{
+			// Player 2's name for HUD tests (offline); applied by the next name= step.
+			s_test_name2 = FucNames::ToName(token.substr(6));
+			continue;
 		}
 		else if (token.starts_with("name="))
 		{
@@ -412,7 +419,7 @@ void BootShortcut::OnInputPolled()
 		}
 		if (step.kind == StepKind::Names)
 		{
-			FucNames::Apply(FucNames::GetLocal(), FucNames::Name{});
+			FucNames::Apply(FucNames::GetLocal(), s_test_name2);
 			s_step++;
 			continue;
 		}

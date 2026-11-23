@@ -928,8 +928,9 @@ Rollback::PadInput Netplay::NameInput()
 	b[0] = HANDSHAKE_MAGIC0;
 	b[1] = HANDSHAKE_NAME_MAGIC1;
 	b[2] = HANDSHAKE_VERSION;
-	const FucNames::Name& name = FucNames::GetLocal();
-	std::memcpy(&b[3], name.data(), name.size());
+	const FucNames::Packed packed = FucNames::Pack(FucNames::GetLocal());
+	static_assert(3 + std::tuple_size_v<FucNames::Packed> <= sizeof(Rollback::PadInput));
+	std::memcpy(&b[3], packed.data(), packed.size());
 	Rollback::PadInput input;
 	std::memcpy(&input, b.data(), sizeof(input));
 	return input;
@@ -941,10 +942,10 @@ std::optional<FucNames::Name> Netplay::DecodeName(const Rollback::PadInput& inpu
 	std::memcpy(b.data(), &input, sizeof(input));
 	if (b[0] != HANDSHAKE_MAGIC0 || b[1] != HANDSHAKE_NAME_MAGIC1 || b[2] != HANDSHAKE_VERSION)
 		return std::nullopt;
-	// Sanitized again: only characters the game's font has reach its memory.
-	char raw[FucNames::MAX_LENGTH + 1] = {};
-	std::memcpy(raw, &b[3], FucNames::MAX_LENGTH);
-	return FucNames::ToName(raw);
+	// Unpacking only yields characters the game's font has.
+	FucNames::Packed packed;
+	std::memcpy(packed.data(), &b[3], packed.size());
+	return FucNames::Unpack(packed);
 }
 
 Rollback::PadInput Netplay::LocalInput(u32 port)

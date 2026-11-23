@@ -26,6 +26,7 @@ class Error;
 //   shot                 screenshot to logs/bootshortcut (diagnostics)
 //   dumpram              write EE RAM to logs/bootshortcut (diagnostics)
 //   name=<NAME>          local player name; writes the HUD name patch for P1 when reached (tests)
+//   name2=<NAME>         player 2 name for the next name= step (tests)
 //   shots=<N>            screenshot every N frames (diagnostics)
 //   slow                 run at normal speed instead of fast (diagnostics)
 // Built-in scripts for Fate/unlimited codes: "vs2p" ("Vs. 2P" character select) and "practice"

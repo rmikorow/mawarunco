@@ -241,7 +241,7 @@ RollbackLauncher::RollbackLauncher()
 	tabs->addStretch(1);
 	online->addLayout(tabs);
 
-	// Player name, shown above the health bar in versus (instead of the win count) for both players.
+	// Player name, shown above the health bar in versus ("<name> / <wins>") for both players.
 	QHBoxLayout* name_row = new QHBoxLayout();
 	name_row->setSpacing(0);
 	QLabel* name_label = new QLabel(tr("Name"), online_page);
