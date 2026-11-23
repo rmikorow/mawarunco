@@ -33,13 +33,13 @@ signed ("More info" > "Run anyway").
 Run "pcsx2-qtx64-clang.exe". The start window opens:
 
 - BUTTON CONFIG:
-    In-game layout: which game action each PS2 button does (L/M/H attack,
-    reflect guard, combined attacks, SP attacks, ...), like the game's own
-    CONTROLLER SETTINGS menu. Set it once; it is saved and used for training
-    and online, whether you are player 1 or player 2.
-    MAP CONTROLLER: which button of your controller is which PS2 button
-    (controller port 1). An Xbox/XInput controller is usually detected
-    automatically.
+    The game's button config, like its own CONTROLLER SETTINGS menu: click
+    an action (L - ATTACK, REFLECT GUARD, SP ATTACK A, ...), then press the
+    button for it on your controller. Set it once; it is saved and used for
+    training and online, whether you are player 1 or player 2.
+    Map controller: if a button is not recognized, first set which button of
+    your controller is which PS2 button (controller port 1). An Xbox/XInput
+    controller is usually detected automatically.
 
 - ONLINE:
     Delay: input delay, 1 frame recommended. Both players should pick the
