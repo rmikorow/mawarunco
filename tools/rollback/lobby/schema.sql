@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS mwr_rooms (
     token_hash CHAR(64) NOT NULL,
     ver CHAR(40) NOT NULL,
     host_name VARCHAR(20) NOT NULL,
+    country CHAR(2) NULL,
     host_ip VARCHAR(15) NOT NULL,
     host_port INT NOT NULL,
     delay_frames TINYINT NOT NULL,

@@ -102,6 +102,7 @@ private:
 	QButtonGroup* m_rollback_group = nullptr; // id = rollback depth in frames
 	QLineEdit* m_host_address = nullptr;
 	QLineEdit* m_player_name = nullptr;
+	QComboBox* m_country = nullptr; // shown with an own room; data = ISO code, empty = not shown
 	// Display page.
 	QComboBox* m_resolution = nullptr;
 	QPushButton* m_mode_window = nullptr;

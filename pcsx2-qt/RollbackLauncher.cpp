@@ -31,6 +31,7 @@
 #include <QtCore/QPropertyAnimation>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QLocale>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QTimer>
 #include <QtGui/QCloseEvent>
@@ -298,11 +299,54 @@ RollbackLauncher::RollbackLauncher()
 		m_player_name->setCursorPosition(cursor);
 	});
 	name_row->addWidget(m_player_name);
-	QLabel* name_hint = new QLabel(tr("   shown above your health bar"), online_page);
+		QLabel* name_hint = new QLabel(tr("   shown above your health bar"), online_page);
 	name_hint->setObjectName(QStringLiteral("Hint"));
 	name_row->addWidget(name_hint);
 	name_row->addStretch(1);
 	online->addLayout(name_row);
+
+	// Country, shown next to the name in the room list. Preselected from the Windows region (no IP lookup);
+	// the player may change it or hide it.
+	QHBoxLayout* country_row = new QHBoxLayout();
+	country_row->setSpacing(0);
+	QLabel* country_label = new QLabel(tr("Country"), online_page);
+	country_label->setMinimumWidth(70);
+	country_row->addWidget(country_label);
+	m_country = new QComboBox(online_page);
+	m_country->setMinimumWidth(220);
+	m_country->setMaximumWidth(220);
+	{
+		std::vector<std::pair<QString, QString>> countries; // name, code
+		for (int t = 1; t <= static_cast<int>(QLocale::LastTerritory); t++)
+		{
+			const QLocale::Territory territory = static_cast<QLocale::Territory>(t);
+			const QString code = QLocale::territoryToCode(territory);
+			if (code.size() == 2 && code.at(0).isUpper() && code.at(1).isUpper())
+				countries.emplace_back(QLocale::territoryToString(territory), code);
+		}
+		std::sort(countries.begin(), countries.end());
+		countries.erase(std::unique(countries.begin(), countries.end(),
+							[](const auto& a, const auto& b) { return a.second == b.second; }),
+			countries.end());
+		m_country->addItem(tr("(not shown)"), QString());
+		for (const auto& [name, code] : countries)
+			m_country->addItem(QStringLiteral("%1  (%2)").arg(name, code), code);
+		const std::string saved = Host::GetBaseStringSettingValue(SECTION, "Country", "auto");
+		const QString wanted = (saved == "auto") ? QLocale::territoryToCode(QLocale::system().territory()) :
+		                                           QString::fromStdString(saved);
+		const int index = m_country->findData(wanted);
+		m_country->setCurrentIndex(std::max(index, 0));
+	}
+	connect(m_country, &QComboBox::currentIndexChanged, this, [this]() {
+		Host::SetBaseStringSettingValue(SECTION, "Country", m_country->currentData().toString().toUtf8().constData());
+		Host::CommitBaseSettingChanges();
+	});
+	country_row->addWidget(m_country);
+	QLabel* country_hint = new QLabel(tr("   shown in the room list when you create a room"), online_page);
+	country_hint->setObjectName(QStringLiteral("Hint"));
+	country_row->addWidget(country_hint);
+	country_row->addStretch(1);
+	online->addLayout(country_row);
 
 	QHBoxLayout* delay_row = new QHBoxLayout();
 	delay_row->setSpacing(0);
@@ -392,7 +436,7 @@ RollbackLauncher::RollbackLauncher()
 	rooms->setContentsMargins(0, 0, 0, 0);
 	rooms->setSpacing(8);
 	m_room_list = new QTreeWidget(rooms_page);
-	m_room_list->setHeaderLabels({tr("HOST"), tr("DELAY"), tr("ROLLBACK"), tr("ACCESS"), tr("OPEN FOR")});
+	m_room_list->setHeaderLabels({tr("HOST"), tr("COUNTRY"), tr("DELAY"), tr("ROLLBACK"), tr("ACCESS"), tr("OPEN FOR")});
 	m_room_list->setRootIsDecorated(false);
 	m_room_list->setUniformRowHeights(true);
 	m_room_list->setAlternatingRowColors(true);
@@ -400,7 +444,7 @@ RollbackLauncher::RollbackLauncher()
 	m_room_list->setEditTriggers(QAbstractItemView::NoEditTriggers);
 	m_room_list->header()->setStretchLastSection(false);
 	m_room_list->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-	for (int column = 1; column < 5; column++)
+	for (int column = 1; column < 6; column++)
 		m_room_list->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
 	m_room_list->setMinimumHeight(120);
 	rooms->addWidget(m_room_list, 1);
@@ -1225,13 +1269,16 @@ void RollbackLauncher::refreshRooms()
 			// Names are plain item text (never rich text).
 			QTreeWidgetItem* item = new QTreeWidgetItem(m_room_list);
 			item->setText(0, room.host);
-			item->setText(1, QString::number(room.delay));
-			item->setText(2, QString::number(room.rollback));
-			item->setText(3, room.locked ? tr("code") : tr("open"));
-			item->setText(4, (room.age_seconds < 60) ? tr("%1 s").arg(room.age_seconds) : tr("%1 min").arg(room.age_seconds / 60));
+			item->setText(1, room.country.isEmpty() ? QStringLiteral("-") : room.country);
+			if (!room.country.isEmpty())
+				item->setToolTip(1, QLocale::territoryToString(QLocale::codeToTerritory(room.country)));
+			item->setText(2, QString::number(room.delay));
+			item->setText(3, QString::number(room.rollback));
+			item->setText(4, room.locked ? tr("code") : tr("open"));
+			item->setText(5, (room.age_seconds < 60) ? tr("%1 s").arg(room.age_seconds) : tr("%1 min").arg(room.age_seconds / 60));
 			item->setData(0, Qt::UserRole, room.id);
 			item->setData(0, Qt::UserRole + 1, room.locked);
-			for (int column = 1; column < 5; column++)
+			for (int column = 1; column < 6; column++)
 				item->setTextAlignment(column, Qt::AlignCenter);
 			if (room.id == selected_id)
 				item->setSelected(true);
@@ -1281,7 +1328,7 @@ void RollbackLauncher::onCreateRoomClicked()
 	m_create_room_button->setEnabled(false);
 	m_join_room_button->setEnabled(false);
 	m_rooms_status->setText(tr("Creating the room ..."));
-	m_lobby->createRoom(name, delay, rollback, port, code,
+	m_lobby->createRoom(name, m_country->currentData().toString().toStdString(), delay, rollback, port, code,
 		[this, port, delay, rollback](LobbyClient::Result<LobbyClient::CreatedRoom> result) {
 			if (!result.value)
 			{

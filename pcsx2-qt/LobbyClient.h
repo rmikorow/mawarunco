@@ -31,6 +31,7 @@ public:
 	{
 		QString id;
 		QString host;
+		QString country; // ISO 3166-1 alpha-2 chosen by the host, empty = not shown
 		int delay = 0;
 		int rollback = 0;
 		bool locked = false;
@@ -79,8 +80,9 @@ public:
 	static std::string GetUrl();
 
 	void listRooms(std::function<void(Result<RoomList>)> done);
-	void createRoom(const std::string& name, int delay, int rollback, int port, const std::string& code,
-		std::function<void(Result<CreatedRoom>)> done);
+	/// country: ISO 3166-1 alpha-2 code the host chose to show, or empty.
+	void createRoom(const std::string& name, const std::string& country, int delay, int rollback, int port,
+		const std::string& code, std::function<void(Result<CreatedRoom>)> done);
 	void heartbeat(const QString& id, const QString& token, std::function<void(Result<Heartbeat>)> done);
 	void joinRoom(const QString& id, const std::string& name, const std::string& code,
 		std::function<void(Result<JoinInfo>)> done);

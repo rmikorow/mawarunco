@@ -3,7 +3,7 @@
 // joiner gets the host's IP address and port and connects directly (UDP), as with a typed-in address.
 //
 //   GET  ?action=list&ver=<build>                          open rooms of this build (never IP addresses)
-//   POST action=create  ver, name, delay, rollback, port, [code]   -> id, token
+//   POST action=create  ver, name, delay, rollback, port, [code], [country]   -> id, token
 //   POST action=heartbeat  id, token                       keeps the room listed -> status, guest
 //   POST action=join    id, ver, name, [code]              -> host address, port, delay, rollback
 //   POST action=close   id, token
@@ -11,8 +11,9 @@
 // Tables: schema.sql (created once with the database's main login; this script only needs a login that
 // can read and write rows).
 //
-// Stored per room: host name, room settings, the host's IP address and port (only to hand them to the
-// joiner), a hash of the room code and of the host's token. Rooms disappear 30 s after the host's last
+// Stored per room: host name, the country the host chose to show (optional; no IP lookup), room settings,
+// the host's IP address and port (only to hand them to the joiner), a hash of the room code and of the
+// host's token. Rooms disappear 30 s after the host's last
 // heartbeat, together with the IP address. Rate limits keep a salted hash of the client IP for at most
 // an hour. Nothing else is stored or logged by this script.
 //
@@ -27,6 +28,7 @@ const PLAYING_TIMEOUT = 30;     // same for a room in a match (host closes it wh
 const MAX_ROOMS = 200;          // listed rooms in total
 const NAME_PATTERN = '/^[A-Za-z0-9 .!?-]{1,20}$/';  // the game's font, as in the launcher
 const CODE_PATTERN = '/^[A-Za-z0-9]{4,16}$/';
+const COUNTRY_PATTERN = '/^[A-Z]{2}$/';   // ISO 3166-1 alpha-2, chosen by the host
 const VER_PATTERN = '/^[0-9a-f]{40}$/';
 const ID_PATTERN = '/^[0-9a-f]{16}$/';
 const TOKEN_PATTERN = '/^[0-9a-f]{64}$/';
@@ -190,7 +192,7 @@ $now = time();
 switch ($action) {
     case 'list':
         $ver = param('ver', VER_PATTERN);
-        $query = $pdo->prepare('SELECT id, host_name, delay_frames, rollback_frames, code_hash, created FROM mwr_rooms
+        $query = $pdo->prepare('SELECT id, host_name, country, delay_frames, rollback_frames, code_hash, created FROM mwr_rooms
             WHERE ver = ? AND status = ? ORDER BY created DESC LIMIT ' . MAX_ROOMS);
         $query->execute([$ver, 'open']);
         $rooms = [];
@@ -198,6 +200,7 @@ switch ($action) {
             $rooms[] = [
                 'id' => $room['id'],
                 'host' => $room['host_name'],
+                'country' => $room['country'],
                 'delay' => (int) $room['delay_frames'],
                 'rollback' => (int) $room['rollback_frames'],
                 'locked' => $room['code_hash'] !== null,
@@ -215,6 +218,7 @@ switch ($action) {
         $rollback = int_param('rollback', 1, 8);
         $port = int_param('port', 1024, 65535);
         $code = optional_param('code', CODE_PATTERN);
+        $country = optional_param('country', COUNTRY_PATTERN);
         $ip = client_ip();
         // Netplay is IPv4 only, and the address must be reachable from the internet.
         $flags = FILTER_FLAG_IPV4 | (empty($config['allow_private_hosts']) ? FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE : 0);
@@ -228,9 +232,9 @@ switch ($action) {
         }
         $id = bin2hex(random_bytes(8));
         $token = bin2hex(random_bytes(32));
-        $pdo->prepare('INSERT INTO mwr_rooms (id, token_hash, ver, host_name, host_ip, host_port, delay_frames,
-            rollback_frames, code_hash, status, guest_name, created, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)')
-            ->execute([$id, hash('sha256', $token), $ver, $name, $ip, $port, $delay, $rollback,
+        $pdo->prepare('INSERT INTO mwr_rooms (id, token_hash, ver, host_name, country, host_ip, host_port, delay_frames,
+            rollback_frames, code_hash, status, guest_name, created, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)')
+            ->execute([$id, hash('sha256', $token), $ver, $name, $country, $ip, $port, $delay, $rollback,
                 $code === null ? null : password_hash(strtoupper($code), PASSWORD_DEFAULT), 'open', $now, $now]);
         respond(200, ['ok' => true, 'id' => $id, 'token' => $token]);
 

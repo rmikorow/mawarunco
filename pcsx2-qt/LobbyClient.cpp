@@ -45,6 +45,12 @@ static bool IsToken(const QString& s)
 	return re.match(s).hasMatch();
 }
 
+static bool IsCountry(const QString& s)
+{
+	static const QRegularExpression re(QStringLiteral("^[A-Z]{2}$"));
+	return re.match(s).hasMatch();
+}
+
 static bool IsName(const QString& s)
 {
 	static const QRegularExpression re(QStringLiteral("^[A-Za-z0-9 .!?-]{1,20}$"));
@@ -198,6 +204,8 @@ void LobbyClient::listRooms(std::function<void(Result<RoomList>)> done)
 			room.delay = *delay;
 			room.rollback = *rollback;
 			room.locked = r.value(QStringLiteral("locked")).toBool();
+			if (const QString country = r.value(QStringLiteral("country")).toString(); IsCountry(country))
+				room.country = country;
 			room.age_seconds = IntIn(r.value(QStringLiteral("age")), 0, 1 << 30).value_or(0);
 			list.rooms.push_back(std::move(room));
 			if (list.rooms.size() >= 200)
@@ -208,13 +216,15 @@ void LobbyClient::listRooms(std::function<void(Result<RoomList>)> done)
 	});
 }
 
-void LobbyClient::createRoom(const std::string& name, int delay, int rollback, int port, const std::string& code,
-	std::function<void(Result<CreatedRoom>)> done)
+void LobbyClient::createRoom(const std::string& name, const std::string& country, int delay, int rollback, int port,
+	const std::string& code, std::function<void(Result<CreatedRoom>)> done)
 {
 	std::string form = fmt::format("action=create&ver={}&name={}&delay={}&rollback={}&port={}", BuildVersion::GitHash,
 		Encode(name), delay, rollback, port);
 	if (!code.empty())
 		form += "&code=" + Encode(code);
+	if (IsCountry(QString::fromStdString(country)))
+		form += "&country=" + country;
 	post(form, [done](int status, const QByteArray& body, const QString& transport_error) {
 		Result<CreatedRoom> result;
 		const std::optional<QJsonObject> obj = ParseReply(status, body, transport_error, &result.error);
