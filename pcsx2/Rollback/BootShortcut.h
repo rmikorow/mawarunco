@@ -25,6 +25,7 @@ class Error;
 //   poke8|poke16|poke32:<addr>=<value>   write EE memory (hex), e.g. poke8:3a1b20=ff
 //   shot                 screenshot to logs/bootshortcut (diagnostics)
 //   dumpram              write EE RAM to logs/bootshortcut (diagnostics)
+//   name=<NAME>          local player name; writes the HUD name patch for P1 when reached (tests)
 //   shots=<N>            screenshot every N frames (diagnostics)
 //   slow                 run at normal speed instead of fast (diagnostics)
 // Built-in scripts for Fate/unlimited codes: "vs2p" ("Vs. 2P" character select) and "practice"

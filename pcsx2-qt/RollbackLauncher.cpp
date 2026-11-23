@@ -9,6 +9,7 @@
 #include "pcsx2/Host.h"
 #include "pcsx2/Rollback/BootShortcut.h"
 #include "pcsx2/Rollback/FucButtons.h"
+#include "pcsx2/Rollback/FucNames.h"
 #include "pcsx2/Rollback/Netplay.h"
 #include "pcsx2/VMManager.h"
 #include "pcsx2/ps2/BiosTools.h"
@@ -30,6 +31,7 @@
 #include <QtGui/QCloseEvent>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QHideEvent>
+#include <QtGui/QRegularExpressionValidator>
 #include <QtGui/QKeyEvent>
 #include <QtCore/QSignalBlocker>
 #include <QtWidgets/QApplication>
@@ -238,6 +240,31 @@ RollbackLauncher::RollbackLauncher()
 	tabs->addWidget(tab_rooms);
 	tabs->addStretch(1);
 	online->addLayout(tabs);
+
+	// Player name, shown above the health bar in versus (instead of the win count) for both players.
+	QHBoxLayout* name_row = new QHBoxLayout();
+	name_row->setSpacing(0);
+	QLabel* name_label = new QLabel(tr("Name"), online_page);
+	name_label->setMinimumWidth(70);
+	name_row->addWidget(name_label);
+	m_player_name = new QLineEdit(online_page);
+	m_player_name->setMaxLength(static_cast<int>(FucNames::MAX_LENGTH));
+	m_player_name->setMaximumWidth(220);
+	m_player_name->setPlaceholderText(tr("YOUR NAME"));
+	m_player_name->setValidator(new QRegularExpressionValidator(QRegularExpression(QStringLiteral("[A-Za-z0-9 .!?-]*")), m_player_name));
+	m_player_name->setText(QString::fromStdString(FucNames::Sanitize(Host::GetBaseStringSettingValue(SECTION, "PlayerName", ""))));
+	connect(m_player_name, &QLineEdit::textEdited, this, [this](const QString& text) {
+		// The game's font has upper-case letters only.
+		const int cursor = m_player_name->cursorPosition();
+		m_player_name->setText(text.toUpper());
+		m_player_name->setCursorPosition(cursor);
+	});
+	name_row->addWidget(m_player_name);
+	QLabel* name_hint = new QLabel(tr("   shown above your health bar"), online_page);
+	name_hint->setObjectName(QStringLiteral("Hint"));
+	name_row->addWidget(name_hint);
+	name_row->addStretch(1);
+	online->addLayout(name_row);
 
 	QHBoxLayout* delay_row = new QHBoxLayout();
 	delay_row->setSpacing(0);
@@ -860,6 +887,9 @@ void RollbackLauncher::boot(const std::string& netplay_spec, const char* shortcu
 	// Remembered for the next start.
 	Host::SetBaseIntSettingValue(SECTION, "Delay", selectedDelay());
 	Host::SetBaseStringSettingValue(SECTION, "HostAddress", m_host_address->text().trimmed().toUtf8().constData());
+	const std::string name = FucNames::Sanitize(m_player_name->text().toStdString());
+	Host::SetBaseStringSettingValue(SECTION, "PlayerName", name.c_str());
+	FucNames::SetLocal(name);
 
 	// Everything the modes rely on: the found BIOS, a DualShock 2 on both ports (netplay injects both),
 	// the game in its own window while the launcher is hidden.

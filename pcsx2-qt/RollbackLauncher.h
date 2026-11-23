@@ -79,6 +79,7 @@ private:
 	QStackedWidget* m_pages = nullptr;
 	QButtonGroup* m_delay_group = nullptr; // id = delay in frames
 	QLineEdit* m_host_address = nullptr;
+	QLineEdit* m_player_name = nullptr;
 	QPushButton* m_host_button = nullptr;
 	QPushButton* m_join_button = nullptr;
 	QPushButton* m_practice_button = nullptr;

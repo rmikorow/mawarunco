@@ -965,6 +965,7 @@ set(pcsx2RecordingSources
 	Rollback/Rollback.cpp
 	Rollback/BootShortcut.cpp
 	Rollback/FucButtons.cpp
+	Rollback/FucNames.cpp
 	Rollback/RunAhead.cpp
 	Rollback/RollbackTest.cpp
 	${rec_src}/Utilities/InputRecordingLogger.cpp
@@ -981,6 +982,7 @@ set(pcsx2RecordingHeaders
 	Rollback/Rollback.h
 	Rollback/BootShortcut.h
 	Rollback/FucButtons.h
+	Rollback/FucNames.h
 	Rollback/RunAhead.h
 	Rollback/RollbackTest.h
 	${rec_src}/Utilities/InputRecordingLogger.h

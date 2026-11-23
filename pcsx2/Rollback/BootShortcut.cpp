@@ -3,6 +3,7 @@
 
 #include "Rollback/BootShortcut.h"
 #include "Rollback/FucButtons.h"
+#include "Rollback/FucNames.h"
 #include "Rollback/Netplay.h"
 #include "Rollback/Rollback.h"
 
@@ -41,6 +42,7 @@ namespace BootShortcut
 		Poke,
 		Shot,
 		DumpRam,
+		Names,
 	};
 
 	struct Step
@@ -166,6 +168,13 @@ bool BootShortcut::Parse(std::string_view text, Script* out, Error* error)
 		else if (token == "shot")
 		{
 			step.kind = StepKind::Shot;
+		}
+		else if (token.starts_with("name="))
+		{
+			// Local player name for the fight HUD (offline tests; the launcher sets it directly). Also a step:
+			// writes the HUD patch with the name for P1 when reached (after the game has booted).
+			FucNames::SetLocal(token.substr(5));
+			step.kind = StepKind::Names;
 		}
 		else if (token == "slow")
 		{
@@ -320,6 +329,7 @@ void BootShortcut::Finish()
 	if (!Netplay::IsActive())
 	{
 		FucButtons::Write(0, FucButtons::GetLocal());
+		FucNames::Apply(FucNames::GetLocal(), FucNames::Name{});
 		Console.WriteLn(fmt::format("Boot shortcut: P1 button layout {}", FucButtons::ToString(FucButtons::GetLocal())));
 	}
 
@@ -397,6 +407,12 @@ void BootShortcut::OnInputPolled()
 				memWrite16(step.addr, static_cast<u16>(step.value));
 			else
 				memWrite32(step.addr, step.value);
+			s_step++;
+			continue;
+		}
+		if (step.kind == StepKind::Names)
+		{
+			FucNames::Apply(FucNames::GetLocal(), FucNames::Name{});
 			s_step++;
 			continue;
 		}

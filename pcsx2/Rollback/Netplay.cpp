@@ -4,6 +4,7 @@
 #include "Rollback/Netplay.h"
 #include "Rollback/BootShortcut.h"
 #include "Rollback/FucButtons.h"
+#include "Rollback/FucNames.h"
 #include "Rollback/Rollback.h"
 #include "Rollback/RunAhead.h"
 
@@ -84,16 +85,20 @@ namespace Netplay
 	static constexpr u8 HANDSHAKE_MAGIC0 = 0xF5;
 	static constexpr u8 HANDSHAKE_MAGIC1 = 0xC0;
 	static constexpr u8 HANDSHAKE_VERSION = 1;
+	static constexpr u8 HANDSHAKE_NAME_MAGIC1 = 0xC1; // second input: the player name
 	struct Handshake
 	{
 		FucButtons::Layout layout;
 		u32 bios = 0;
 	};
 	static std::array<std::optional<Handshake>, NUM_PLAYERS> s_handshake;
+	static std::array<std::optional<FucNames::Name>, NUM_PLAYERS> s_names;
 	static bool s_handshake_sent = false;
 	static bool s_bios_warning_shown = false;
 	static Rollback::PadInput HandshakeInput();
 	static std::optional<Handshake> DecodeHandshake(const Rollback::PadInput& input);
+	static Rollback::PadInput NameInput();
+	static std::optional<FucNames::Name> DecodeName(const Rollback::PadInput& input);
 	static int s_first_desync_frame = -1; // first frame GGRS reported as desynced, -1 = none
 	static u32 s_desync_reports = 0;      // further reports after the first
 	static int s_timesync_frame = -1; // frame for which the time sync wait was applied
@@ -289,6 +294,11 @@ bool Netplay::SetLaunchOptions(std::string_view spec, Error* error)
 			}
 			FucButtons::SetLocal(*layout);
 		}
+		else if (key == "name")
+		{
+			// The local player's name for the fight HUD; the launcher sets it directly.
+			FucNames::SetLocal(value);
+		}
 		else if (key == "desynctest")
 		{
 			const std::optional<u32> v = number(1000000);
@@ -382,6 +392,7 @@ bool Netplay::Start(const Options& opts, Error* error)
 	s_first_desync_frame = -1;
 	s_desync_reports = 0;
 	s_handshake = {};
+	s_names = {};
 	s_handshake_sent = false;
 	s_bios_warning_shown = false;
 
@@ -581,7 +592,8 @@ bool Netplay::AdvanceSession()
 		const Rollback::PadInput real_input = LocalInput(LOCAL_CONTROLLER_PORT);
 		s_last_local_input = real_input;
 		// The first input of the session carries the handshake (repeated until GGRS has taken it).
-		const Rollback::PadInput input = (ggrs_current_frame(s_session) == 0) ? HandshakeInput() : real_input;
+		const int input_frame = ggrs_current_frame(s_session);
+		const Rollback::PadInput input = (input_frame == 0) ? HandshakeInput() : (input_frame == 1) ? NameInput() : real_input;
 		if (ggrs_add_local_input(s_session, s_options.local_player, reinterpret_cast<const u8*>(&input)) < 0)
 		{
 			Fail(fmt::format("add_local_input failed: {}", LastGgrsError()));
@@ -683,19 +695,28 @@ void Netplay::ProcessRequests()
 						s_handshake[port] = hs;
 						inputs[port] = Rollback::PadInput{};
 					}
+					else if (std::optional<FucNames::Name> name = DecodeName(inputs[port]))
+					{
+						s_names[port] = name;
+						inputs[port] = Rollback::PadInput{};
+					}
 				}
 				if (s_advance_frame == HANDSHAKE_FRAME)
 				{
 					for (u32 port = 0; port < NUM_PLAYERS; port++)
 						FucButtons::Write(port, s_handshake[port] ? s_handshake[port]->layout : FucButtons::Default());
+					FucNames::Apply(s_names[0].value_or(FucNames::Name{}), s_names[1].value_or(FucNames::Name{}));
 					// Once both are known (possibly only in a resimulated frame): log, and warn about different BIOS
 					// versions, the usual reason why two boots differ.
 					if (s_handshake[0] && s_handshake[1] && !s_bios_warning_shown)
 					{
 						s_bios_warning_shown = true;
-						Console.WriteLn(fmt::format("Netplay: button layouts P1 {} P2 {}, BIOS {:08x} / {:08x}",
+						auto name_text = [](const std::optional<FucNames::Name>& n) {
+							return n ? std::string(n->data(), strnlen(n->data(), n->size())) : std::string();
+						};
+						Console.WriteLn(fmt::format("Netplay: button layouts P1 {} P2 {}, BIOS {:08x} / {:08x}, names '{}' / '{}'",
 							FucButtons::ToString(s_handshake[0]->layout), FucButtons::ToString(s_handshake[1]->layout),
-							s_handshake[0]->bios, s_handshake[1]->bios));
+							s_handshake[0]->bios, s_handshake[1]->bios, name_text(s_names[0]), name_text(s_names[1])));
 						if (s_handshake[0]->bios != s_handshake[1]->bios)
 						{
 							Console.Error("Netplay: the players use different BIOS versions");
@@ -899,6 +920,31 @@ std::optional<Netplay::Handshake> Netplay::DecodeHandshake(const Rollback::PadIn
 		a = std::min<u8>(a, FucButtons::NUM_ACTIONS - 1);
 	std::memcpy(&hs.bios, &b[3 + hs.layout.size()], sizeof(hs.bios));
 	return hs;
+}
+
+Rollback::PadInput Netplay::NameInput()
+{
+	std::array<u8, sizeof(Rollback::PadInput)> b = {};
+	b[0] = HANDSHAKE_MAGIC0;
+	b[1] = HANDSHAKE_NAME_MAGIC1;
+	b[2] = HANDSHAKE_VERSION;
+	const FucNames::Name& name = FucNames::GetLocal();
+	std::memcpy(&b[3], name.data(), name.size());
+	Rollback::PadInput input;
+	std::memcpy(&input, b.data(), sizeof(input));
+	return input;
+}
+
+std::optional<FucNames::Name> Netplay::DecodeName(const Rollback::PadInput& input)
+{
+	std::array<u8, sizeof(Rollback::PadInput)> b;
+	std::memcpy(b.data(), &input, sizeof(input));
+	if (b[0] != HANDSHAKE_MAGIC0 || b[1] != HANDSHAKE_NAME_MAGIC1 || b[2] != HANDSHAKE_VERSION)
+		return std::nullopt;
+	// Sanitized again: only characters the game's font has reach its memory.
+	char raw[FucNames::MAX_LENGTH + 1] = {};
+	std::memcpy(raw, &b[3], FucNames::MAX_LENGTH);
+	return FucNames::ToName(raw);
 }
 
 Rollback::PadInput Netplay::LocalInput(u32 port)
