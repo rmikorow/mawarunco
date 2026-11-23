@@ -10,6 +10,7 @@
 #include <QtWidgets/QWidget>
 
 #include <array>
+#include <unordered_map>
 #include <string>
 
 class QButtonGroup;
@@ -18,6 +19,7 @@ class QStackedWidget;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QTimer;
 
 // Rollback fork: start window for players of the Fate/unlimited codes package. Replaces the PCSX2 main
 // window while no game runs ([UI] RollbackLauncher = true): netplay (host or join with input delay),
@@ -42,7 +44,7 @@ public:
 protected:
 	void closeEvent(QCloseEvent* event) override;
 	void hideEvent(QHideEvent* event) override;
-	void keyPressEvent(QKeyEvent* event) override;
+	bool eventFilter(QObject* watched, QEvent* event) override;
 
 private Q_SLOTS:
 	void onHostClicked();
@@ -50,6 +52,7 @@ private Q_SLOTS:
 	void onPracticeClicked();
 	void onKeyConfigClicked();
 	void onBindingInput(InputBindingKey key, float value);
+	void onRightHeld();
 
 private:
 	/// Finds BIOS and disc image and updates the status lines. Returns true if both are there.
@@ -63,6 +66,8 @@ private:
 	/// Waits for a controller button for the action (button config page).
 	void startListening(u32 action);
 	void stopListening();
+	/// Moves the selection by a number of rows (keeps listening).
+	void moveSelection(int delta);
 
 	QLabel* m_bios_status = nullptr;
 	QLabel* m_game_status = nullptr;
@@ -78,6 +83,19 @@ private:
 	QLabel* m_bind_hint = nullptr;
 	QFont m_glyph_font;
 	int m_listening_action = -1; // action waiting for a button, -1 = none
+	static constexpr int ROWS_PER_COLUMN = 10;
+	// Inputs held down while listening and what they did (a held input does not act again).
+	enum class Role
+	{
+		Button,
+		Up,
+		Down,
+		Left,
+		Right,
+		Other,
+	};
+	std::unordered_map<u64, Role> m_pressed;
+	QTimer* m_right_hold_timer = nullptr; // holding right for a second clears the selected action
 
 	std::string m_bios_file;  // file name in the BIOS folder
 	std::string m_game_path;  // full path of the disc image

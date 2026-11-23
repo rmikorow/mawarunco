@@ -31,6 +31,7 @@
 #include <QtGui/QHideEvent>
 #include <QtGui/QKeyEvent>
 #include <QtCore/QSignalBlocker>
+#include <QtWidgets/QApplication>
 #include <QtWidgets/QButtonGroup>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QFrame>
@@ -309,7 +310,6 @@ RollbackLauncher::RollbackLauncher()
 	QGridLayout* rows = new QGridLayout();
 	rows->setHorizontalSpacing(12);
 	rows->setVerticalSpacing(4);
-	static constexpr int ROWS_PER_COLUMN = 10;
 	for (u32 action = 1; action < FucButtons::NUM_ACTIONS; action++)
 	{
 		QPushButton* row = new QPushButton(buttons_page);
@@ -340,6 +340,8 @@ RollbackLauncher::RollbackLauncher()
 				stopListening();
 			else
 				startListening(action);
+			// Qt toggled the button on click; the selection state is ours.
+			m_action_rows[action]->setChecked(m_listening_action == static_cast<int>(action));
 		});
 	}
 	buttons->addLayout(rows);
@@ -364,6 +366,10 @@ RollbackLauncher::RollbackLauncher()
 	controller_row->addWidget(key_button);
 	buttons->addLayout(controller_row);
 	buttons->addStretch(1);
+	m_right_hold_timer = new QTimer(this);
+	m_right_hold_timer->setSingleShot(true);
+	m_right_hold_timer->setInterval(1000);
+	connect(m_right_hold_timer, &QTimer::timeout, this, &RollbackLauncher::onRightHeld);
 	loadButtonLayout();
 
 	QPushButton* menu_online = add_menu_entry(tr("ONLINE"), online_page);
@@ -436,14 +442,29 @@ void RollbackLauncher::saveButtonLayout(const FucButtons::Layout& layout)
 
 void RollbackLauncher::startListening(u32 action)
 {
-	stopListening();
+	if (action < 1 || action >= FucButtons::NUM_ACTIONS)
+	{
+		stopListening();
+		return;
+	}
+
+	// Already listening: only move the selection (the hook and held buttons stay).
+	if (m_listening_action >= 0)
+		m_action_rows[static_cast<size_t>(m_listening_action)]->setChecked(false);
+	else
+	{
+		m_pressed.clear();
+		qApp->installEventFilter(this);
+		InputManager::SetHook([this](InputBindingKey key, float value) {
+			QMetaObject::invokeMethod(this, "onBindingInput", Qt::QueuedConnection, Q_ARG(InputBindingKey, key), Q_ARG(float, value));
+			return InputInterceptHook::CallbackResult::StopProcessingEvent;
+		});
+	}
+
 	m_listening_action = static_cast<int>(action);
 	m_action_rows[action]->setChecked(true);
-	m_bind_hint->setText(tr("Press a button for %1 ...   (Esc or click again to cancel)").arg(tr(FucButtons::ActionMenuName(action))));
-	InputManager::SetHook([this](InputBindingKey key, float value) {
-		QMetaObject::invokeMethod(this, "onBindingInput", Qt::QueuedConnection, Q_ARG(InputBindingKey, key), Q_ARG(float, value));
-		return InputInterceptHook::CallbackResult::StopProcessingEvent;
-	});
+	m_bind_hint->setText(tr("Press a button for %1.   D-pad: move, hold right: clear, Esc: stop")
+							 .arg(tr(FucButtons::ActionMenuName(action))));
 }
 
 void RollbackLauncher::stopListening()
@@ -451,14 +472,57 @@ void RollbackLauncher::stopListening()
 	if (m_listening_action < 0)
 		return;
 	InputManager::RemoveHook();
+	qApp->removeEventFilter(this);
+	m_right_hold_timer->stop();
 	m_action_rows[static_cast<size_t>(m_listening_action)]->setChecked(false);
 	m_listening_action = -1;
+	m_pressed.clear();
 	m_bind_hint->clear();
+}
+
+void RollbackLauncher::moveSelection(int delta)
+{
+	const int action = std::clamp(m_listening_action + delta, 1, static_cast<int>(FucButtons::NUM_ACTIONS) - 1);
+	startListening(static_cast<u32>(action));
+}
+
+void RollbackLauncher::onRightHeld()
+{
+	// Holding right for a second clears the selected action (no button), like an empty slot in the game.
+	if (m_listening_action < 0)
+		return;
+	FucButtons::Layout layout = FucButtons::GetLocal();
+	const u32 button = FucButtons::ButtonForAction(layout, static_cast<u32>(m_listening_action));
+	if (button < FucButtons::NUM_BUTTONS)
+		layout[button] = 0;
+	saveButtonLayout(layout);
 }
 
 void RollbackLauncher::onBindingInput(InputBindingKey key, float value)
 {
-	if (m_listening_action < 0 || std::abs(value) < 0.5f)
+	if (m_listening_action < 0)
+		return;
+
+	// Press/release tracking per input (direction masked), so a held button does not trigger again on
+	// the next row and a release can end the hold-right gesture.
+	const u64 id = key.MaskDirection().bits;
+	if (std::abs(value) < 0.5f)
+	{
+		const auto it = m_pressed.find(id);
+		if (it == m_pressed.end())
+			return;
+		const Role role = it->second;
+		m_pressed.erase(it);
+		if (role == Role::Right && m_right_hold_timer->isActive())
+		{
+			// A short press to the right: next column.
+			m_right_hold_timer->stop();
+			if (m_listening_action <= ROWS_PER_COLUMN)
+				moveSelection(ROWS_PER_COLUMN);
+		}
+		return;
+	}
+	if (m_pressed.contains(id))
 		return;
 
 	// The binding string as PCSX2 stores it (half axes such as triggers carry their direction).
@@ -470,36 +534,112 @@ void RollbackLauncher::onBindingInput(InputBindingKey key, float value)
 		stopListening();
 		return;
 	}
-
-	// Which PS2 button of port 1 is mapped to it?
-	for (u32 button = 0; button < FucButtons::NUM_BUTTONS; button++)
-	{
-		for (const std::string& entry : Host::GetBaseStringListSetting("Pad1", FucButtons::ButtonName(button)))
+	auto mapped_to = [&binding](const char* pad_key) {
+		for (const std::string& entry : Host::GetBaseStringListSetting("Pad1", pad_key))
 		{
 			if (entry == binding)
-			{
-				FucButtons::Layout layout = FucButtons::GetLocal();
-				FucButtons::Assign(layout, button, static_cast<u32>(m_listening_action));
-				stopListening();
-				saveButtonLayout(layout);
-				return;
-			}
+				return true;
 		}
+		return false;
+	};
+
+	// D-pad and left stick only navigate; they cannot be assigned.
+	static constexpr std::pair<const char*, Role> nav[] = {{"Up", Role::Up}, {"Down", Role::Down}, {"Left", Role::Left},
+		{"Right", Role::Right}, {"LUp", Role::Up}, {"LDown", Role::Down}, {"LLeft", Role::Left}, {"LRight", Role::Right}};
+	for (const auto& [pad_key, role] : nav)
+	{
+		if (!mapped_to(pad_key))
+			continue;
+		m_pressed.emplace(id, role);
+		switch (role)
+		{
+			case Role::Up:
+				moveSelection(-1);
+				break;
+			case Role::Down:
+				moveSelection(1);
+				break;
+			case Role::Left:
+				if (m_listening_action > ROWS_PER_COLUMN)
+					moveSelection(-ROWS_PER_COLUMN);
+				break;
+			case Role::Right:
+				m_right_hold_timer->start();
+				break;
+			default:
+				break;
+		}
+		return;
 	}
+
+	for (u32 button = 0; button < FucButtons::NUM_BUTTONS; button++)
+	{
+		if (!mapped_to(FucButtons::ButtonName(button)))
+			continue;
+		m_pressed.emplace(id, Role::Button);
+		FucButtons::Layout layout = FucButtons::GetLocal();
+		FucButtons::Assign(layout, button, static_cast<u32>(m_listening_action));
+		saveButtonLayout(layout);
+		// On to the next action; after the last one the prompt ends.
+		if (m_listening_action + 1 < static_cast<int>(FucButtons::NUM_ACTIONS))
+			moveSelection(1);
+		else
+			stopListening();
+		return;
+	}
+
+	m_pressed.emplace(id, Role::Other);
 	m_bind_hint->setText(tr("%1 is not one of the PS2 buttons the game lets you assign (square, triangle, circle, cross, "
 							"L1, L2, R1, R2). Press another button, or map your controller first.")
 							 .arg(QString::fromStdString(binding)));
 }
 
-void RollbackLauncher::keyPressEvent(QKeyEvent* event)
+bool RollbackLauncher::eventFilter(QObject* watched, QEvent* event)
 {
-	// Keyboard input does not reach PCSX2's input manager from this window, so Esc is handled here.
-	if (event->key() == Qt::Key_Escape && m_listening_action >= 0)
+	// While listening, keys go to the prompt instead of moving the focus between buttons: arrow keys move
+	// like the d-pad, Esc stops. (Keyboard input does not reach PCSX2's input manager from this window.)
+	// Claim the keys first, so no application shortcut (e.g. Esc in the hidden main window) takes them.
+	if (m_listening_action >= 0 && event->type() == QEvent::ShortcutOverride)
 	{
-		stopListening();
-		return;
+		switch (static_cast<QKeyEvent*>(event)->key())
+		{
+			case Qt::Key_Escape:
+			case Qt::Key_Up:
+			case Qt::Key_Down:
+			case Qt::Key_Left:
+			case Qt::Key_Right:
+				event->accept();
+				return true;
+			default:
+				break;
+		}
 	}
-	QWidget::keyPressEvent(event);
+	if (m_listening_action >= 0 && event->type() == QEvent::KeyPress)
+	{
+		switch (static_cast<QKeyEvent*>(event)->key())
+		{
+			case Qt::Key_Escape:
+				stopListening();
+				return true;
+			case Qt::Key_Up:
+				moveSelection(-1);
+				return true;
+			case Qt::Key_Down:
+				moveSelection(1);
+				return true;
+			case Qt::Key_Left:
+				if (m_listening_action > ROWS_PER_COLUMN)
+					moveSelection(-ROWS_PER_COLUMN);
+				return true;
+			case Qt::Key_Right:
+				if (m_listening_action <= ROWS_PER_COLUMN)
+					moveSelection(ROWS_PER_COLUMN);
+				return true;
+			default:
+				break;
+		}
+	}
+	return QWidget::eventFilter(watched, event);
 }
 
 void RollbackLauncher::hideEvent(QHideEvent* event)
