@@ -35,8 +35,10 @@ Run "pcsx2-qtx64-clang.exe". The start window opens:
 - BUTTON CONFIG:
     The game's button config, like its own CONTROLLER SETTINGS menu: click
     an action (L - ATTACK, REFLECT GUARD, SP ATTACK A, ...), then press the
-    button for it on your controller. Set it once; it is saved and used for
-    training and online, whether you are player 1 or player 2.
+    button for it on your controller. The selection then moves on to the
+    next action. D-pad: move, hold right for a second: clear the action,
+    Esc: stop. Set it once; it is saved and used for training and online,
+    whether you are player 1 or player 2.
     Map controller: if a button is not recognized, first set which button of
     your controller is which PS2 button (controller port 1). An Xbox/XInput
     controller is usually detected automatically.
