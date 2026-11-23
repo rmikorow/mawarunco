@@ -29,7 +29,8 @@ the game.
 
 | | |
 |---|---|
-| **Rollback netplay** | Direct IP, no VPN. The host forwards one UDP port; joining needs nothing. The host decides input delay (0–8) and rollback depth (1–8). Built on [GGRS](https://github.com/gschup/ggrs). |
+| **Rollback netplay** | Direct connection, no VPN. The host forwards one UDP port; joining needs nothing. The host decides input delay (0–8) and rollback depth (1–8). Built on [GGRS](https://github.com/gschup/ggrs). |
+| **Rooms** | A list of open rooms in the start window: create a room (open or with a code), or join one with a click. No typing of IP addresses; the list never shows them. |
 | **Low input latency** | Input-to-screen latency went from 33.6 ms to 10.6 ms: each frame is presented before the frame limiter sleeps, and 1 frame of run-ahead hides the game's internal lag. Run-ahead works offline and online. |
 | **No shared savestates** | Each player boots their own copy, straight to the character select of *Vs. 2P* or *Practice*, with all characters unlocked. |
 | **Your button config everywhere** | The game's own button config, set once in the start window: click an action, press the button. You keep your layout as player 1 or player 2. |
@@ -46,10 +47,12 @@ the game.
    codes.
 2. Start **Mawarunco**. Under *Button config*, set up your controller and
    buttons; under *Online*, enter your name.
-3. Play:
-   - **Host:** forward UDP port 7000 in your router, click *HOST*, and tell
-     the other player your public IP address.
-   - **Join:** enter the host's IP address and click *JOIN*.
+3. Play, under *Online*:
+   - **Rooms:** click *CREATE ROOM* (optionally with a code), or pick a room
+     from the list and click *JOIN ROOM*.
+   - **Direct (IP):** the host clicks *HOST* and tells the other player their
+     public IP address; the other player enters it and clicks *JOIN*.
+   - Hosting needs UDP port 7000 forwarded in the router, with rooms too.
 
 Both players need the same Mawarunco version and the same BIOS version.
 Windows SmartScreen may warn because the files are not signed ("More info" →
@@ -59,9 +62,9 @@ Windows SmartScreen may warn because the files are not signed ("More info" →
 
 This repository is public so that anyone can check what the program does.
 
-- **Network:**
-  - The only network code added is netplay, active only during an online
-    session.
+- **Network:** two parts were added, netplay and the room list.
+- **Netplay:**
+  - Active only during an online session.
   - It opens one UDP port: 7000 on the host; any free port when joining.
   - Over it go a short handshake (program version, input delay, rollback
     depth) and then GGRS messages, which carry controller input (18 bytes
@@ -71,6 +74,19 @@ This repository is public so that anyone can check what the program does.
   - Code: [`3rdparty/ggrs-capi/src/lib.rs`](3rdparty/ggrs-capi/src/lib.rs)
     (socket, handshake), [`pcsx2/Rollback/Netplay.cpp`](pcsx2/Rollback/Netplay.cpp)
     (session, input handshake for button config and names).
+- **Room list (lobby):**
+  - Used only while the *Rooms* tab is open or you host a room. HTTPS only,
+    certificates are checked.
+  - The launcher sends: program version, your player name, the country you
+    chose (optional), input delay, rollback depth, port and a room code if
+    you set one. The lobby sees your IP address like any web server.
+  - The list shows names and settings, never IP addresses. A host's address
+    goes only to the one player who joins (with the right code, if set).
+    Rooms and their address are deleted 30 seconds after the host leaves.
+  - Everything the lobby sends is checked against a fixed format; the
+    launcher only uses names, numbers and one IPv4 address from it.
+  - Code: [`pcsx2-qt/LobbyClient.cpp`](pcsx2-qt/LobbyClient.cpp) (client),
+    [`tools/rollback/lobby/api.php`](tools/rollback/lobby/api.php) (server).
 - **Nothing is downloaded or started:** no other programs, no registry
   changes, no autostart. The PCSX2 auto updater is off
   ([`pcsx2-qt/AutoUpdaterDialog.cpp`](pcsx2-qt/AutoUpdaterDialog.cpp)).
@@ -103,7 +119,9 @@ messages explain each one.
     fixed for that.
 - [`3rdparty/ggrs-capi/`](3rdparty/ggrs-capi): small C wrapper around GGRS
   (Rust).
-- [`pcsx2-qt/RollbackLauncher.*`](pcsx2-qt): the start window.
+- [`pcsx2-qt/RollbackLauncher.*`](pcsx2-qt): the start window;
+  [`pcsx2-qt/LobbyClient.*`](pcsx2-qt): its room list client.
+- [`tools/rollback/lobby/`](tools/rollback/lobby): the lobby server (PHP).
 - [`tools/rollback/`](tools/rollback): package, patch and installer scripts.
 - The PCSX2 auto updater is disabled: it would replace this build with an
   official release.

@@ -61,9 +61,15 @@ Run "Mawarunco.exe". The start window opens:
     but needs a faster PC).
     Delay: input delay, 1 frame recommended. Both players should pick the
     same value. A higher value helps against rollback stutter on high ping.
-    Host: click "HOST (PLAYER 1)" and tell the other player your public IP
-    address (e.g. from whatismyipaddress.com).
-    Join: enter the host's IP address and click "JOIN (PLAYER 2)".
+    Country: shown next to your name in the room list (taken from your
+    Windows region; "(not shown)" hides it).
+    Rooms tab: the list of open rooms. "CREATE ROOM" lists your room
+    (with a room code if you enter one: only players who know it can join)
+    and waits for a player. Pick a room and click "JOIN ROOM" to play.
+    Hosting a room still needs the port forwarding (1c).
+    Direct (IP) tab: the host clicks "HOST (PLAYER 1)" and tells the other
+    player their public IP address (e.g. from whatismyipaddress.com); the
+    other player enters it and clicks "JOIN (PLAYER 2)".
 
 - TRAINING: practice on your own, offline.
 
@@ -109,6 +115,10 @@ To end a game: close the game window; the start window comes back.
   nothing in Windows (no registry, no autostart).
 - Over the network only the other player's controller input arrives (which
   buttons are pressed), and only during a session.
+- The room list talks to the Mawarunco lobby over HTTPS, only while the
+  Rooms tab is open or you host a room. It sends your name, the country you
+  chose, the room settings and the program version. The list never shows
+  IP addresses; a host's address goes only to the player who joins.
 - Only accept the package from the organizer. A SHA-256 checksum
   (".sha256.txt" next to the zip) lets you check it.
 
