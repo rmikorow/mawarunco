@@ -64,6 +64,14 @@ finally { Pop-Location }
 if (-not $releaseVersion) { throw 'No version tag (v<major>.<minor>.<patch>) found for HEAD.' }
 
 if (-not (Test-Path (Join-Path $bin 'pcsx2-qtx64-clang.exe'))) { throw 'Release build missing (bin\pcsx2-qtx64-clang.exe).' }
+# The exe must be built from the current commit (a failed link leaves the previous exe behind; it would
+# be packaged under the new version and refuse to connect to players of that version).
+Push-Location $repo
+try { $headHash = (git rev-parse HEAD).Trim() }
+finally { Pop-Location }
+if (-not (Select-String -Path (Join-Path $bin 'pcsx2-qtx64-clang.exe') -Pattern $headHash -SimpleMatch -List -Quiet)) {
+    throw "bin\pcsx2-qtx64-clang.exe is not built from the current commit ($($headHash.Substring(0, 9))). Build again."
+}
 if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
 New-Item -ItemType Directory -Force $out | Out-Null
 
