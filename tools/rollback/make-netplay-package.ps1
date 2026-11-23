@@ -59,9 +59,9 @@ $exeName = 'Mawarunco.exe'
 # Version for the file names: the release tag on HEAD (v0.2.2 -> 0.2.2), otherwise git describe
 # (0.2.1-3-g1234abcd), so a test build never looks like a release.
 Push-Location $repo
-try { $version = ((git describe --tags --match 'v[0-9]*' HEAD) | Out-String).Trim() -replace '^v', '' }
+try { $releaseVersion = ((git describe --tags --match 'v[0-9]*' HEAD) | Out-String).Trim() -replace '^v', '' }
 finally { Pop-Location }
-if (-not $version) { throw 'No version tag (v<major>.<minor>.<patch>) found for HEAD.' }
+if (-not $releaseVersion) { throw 'No version tag (v<major>.<minor>.<patch>) found for HEAD.' }
 
 if (-not (Test-Path (Join-Path $bin 'pcsx2-qtx64-clang.exe'))) { throw 'Release build missing (bin\pcsx2-qtx64-clang.exe).' }
 if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
@@ -187,7 +187,7 @@ finally { Pop-Location }
 # files and their checksum files are removed, never a folder (dist may hold a player's unpacked copy).
 Get-ChildItem $dist -File | Where-Object { $_.Name -match '^(FUC-Netplay|Mawarunco)-((Patch-)?(\d{8}|v[\w.-]+)\.zip|Setup-(v[\w.-]+|[\d.]+)\.exe)(\.sha256\.txt)?$' } |
     Remove-Item -Force
-$zip = Join-Path $dist "Mawarunco-v$version.zip"
+$zip = Join-Path $dist "Mawarunco-v$releaseVersion.zip"
 Compress-Archive -Path (Join-Path $out '*') -DestinationPath $zip -CompressionLevel Optimal
 $size = (Get-Item $zip).Length / 1MB
 # SHA-256 next to the zip, so players can check that their copy is the one the organizer built.
@@ -212,7 +212,7 @@ if ($Update) {
         'Old files from earlier versions that are no longer needed: Host.bat, Join.bat, Training.bat,',
         'Einstellungen.bat, netplay.ps1, start.p2s, LIESMICH.txt (you can delete them).'
     ) | Set-Content (Join-Path $upd 'PATCH_README.txt') -Encoding ascii
-    $uzip = Join-Path $dist "Mawarunco-Patch-v$version.zip"
+    $uzip = Join-Path $dist "Mawarunco-Patch-v$releaseVersion.zip"
     if (Test-Path $uzip) { Remove-Item $uzip -Force }
     Compress-Archive -Path (Join-Path $upd '*') -DestinationPath $uzip -CompressionLevel Optimal
     $uhash = (Get-FileHash $uzip -Algorithm SHA256).Hash
@@ -230,9 +230,9 @@ if ($Installer) {
     }
     if (-not $IsccPath) { throw 'Inno Setup compiler (ISCC.exe) not found, pass -IsccPath.' }
     $iss = Join-Path $PSScriptRoot 'installer\mawarunco.iss'
-    & $IsccPath /Q "/DSourceDir=$out" "/DOutputDir=$dist" "/DAppVersion=$version" "/DRepoDir=$repo" $iss
+    & $IsccPath /Q "/DSourceDir=$out" "/DOutputDir=$dist" "/DAppVersion=$releaseVersion" "/DRepoDir=$repo" $iss
     if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)." }
-    $setup = Join-Path $dist "Mawarunco-Setup-v$version.exe"
+    $setup = Join-Path $dist "Mawarunco-Setup-v$releaseVersion.exe"
     $shash = (Get-FileHash $setup -Algorithm SHA256).Hash
     "$shash  $(Split-Path $setup -Leaf)" | Set-Content "$setup.sha256.txt" -Encoding ascii
     Write-Host ("Setup:   {0} ({1:N0} MB)" -f $setup, ((Get-Item $setup).Length / 1MB))
