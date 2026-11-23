@@ -179,6 +179,7 @@
     <ClCompile Include="ShortcutCreationDialog.cpp" />
     <ClCompile Include="QtHost.cpp" />
     <ClCompile Include="RollbackLauncher.cpp" />
+    <ClCompile Include="LobbyClient.cpp" />
     <ClCompile Include="MainWindow.cpp" />
     <ClCompile Include="PrecompiledHeader.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
@@ -275,6 +276,7 @@
     <ClInclude Include="SettingWidgetBinder.h" />
     <QtMoc Include="QtHost.h" />
     <QtMoc Include="RollbackLauncher.h" />
+    <QtMoc Include="LobbyClient.h" />
     <ClInclude Include="PrecompiledHeader.h" />
     <QtMoc Include="AboutDialog.h" />
     <QtMoc Include="AutoUpdaterDialog.h" />

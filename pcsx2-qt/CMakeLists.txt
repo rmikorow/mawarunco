@@ -38,6 +38,8 @@ target_sources(pcsx2-qt PRIVATE
 	Translations.cpp
 	QtHost.cpp
 	QtHost.h
+	LobbyClient.cpp
+	LobbyClient.h
 	RollbackLauncher.cpp
 	RollbackLauncher.h
 	QtKeyCodes.cpp

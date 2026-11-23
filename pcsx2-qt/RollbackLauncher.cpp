@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "RollbackLauncher.h"
+#include "LobbyClient.h"
 #include "MainWindow.h"
 #include "QtHost.h"
 
@@ -15,8 +16,10 @@
 #include "pcsx2/ps2/BiosTools.h"
 #include "pcsx2/Input/InputManager.h"
 
+#include "IconsFontAwesome.h"
 #include "IconsPromptFont.h"
 
+#include "common/Console.h"
 #include "common/Error.h"
 #include "common/MD5Digest.h"
 #include "common/FileSystem.h"
@@ -33,6 +36,7 @@
 #include <QtGui/QCloseEvent>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QHideEvent>
+#include <QtGui/QShowEvent>
 #include <QtGui/QRegularExpressionValidator>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
@@ -46,6 +50,9 @@
 #include <QtWidgets/QGraphicsOpacityEffect>
 #include <QtWidgets/QGridLayout>
 #include <QtWidgets/QGroupBox>
+#include <QtWidgets/QHeaderView>
+#include <QtWidgets/QInputDialog>
+#include <QtWidgets/QTreeWidget>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
@@ -146,6 +153,16 @@ QComboBox {
 }
 QComboBox:hover { border-color: #e0c27a; }
 QComboBox QAbstractItemView { color: #e9e2d6; background: #1a0c14; selection-background-color: #c8102e; }
+QTreeWidget {
+	color: #e9e2d6; background: rgba(0, 0, 0, 110); border: 1px solid rgba(200, 162, 74, 70);
+	border-radius: 3px; font-size: 13px; alternate-background-color: rgba(255, 255, 255, 8);
+}
+QTreeWidget::item { padding: 5px 4px; }
+QTreeWidget::item:selected { color: #ffffff; background: rgba(200, 16, 46, 170); }
+QHeaderView::section {
+	color: #c8a24a; background: rgba(0, 0, 0, 140); border: none; border-bottom: 1px solid rgba(200, 162, 74, 70);
+	padding: 5px 6px; font-size: 12px; font-weight: 700; letter-spacing: 1px;
+}
 )";
 
 RollbackLauncher::RollbackLauncher()
@@ -243,19 +260,22 @@ RollbackLauncher::RollbackLauncher()
 		   "Each player plays with their own button config."),
 		&online);
 
-	// Direct IP now, rooms (lobby server) later.
+	m_online_page = online_page;
+
+	// Direct IP, or rooms on the lobby server (it lists rooms and hands the host's address to the joiner).
 	QHBoxLayout* tabs = new QHBoxLayout();
 	tabs->setSpacing(0);
+	QButtonGroup* tab_group = new QButtonGroup(this);
 	QPushButton* tab_direct = new QPushButton(tr("Direct (IP)"), online_page);
-	tab_direct->setObjectName(QStringLiteral("Tab"));
-	tab_direct->setCheckable(true);
-	tab_direct->setChecked(true);
-	QPushButton* tab_rooms = new QPushButton(tr("Rooms  (coming soon)"), online_page);
-	tab_rooms->setObjectName(QStringLiteral("Tab"));
-	tab_rooms->setEnabled(false);
-	tab_rooms->setToolTip(tr("Rooms on a lobby server, without port forwarding. Coming later."));
-	tabs->addWidget(tab_direct);
-	tabs->addWidget(tab_rooms);
+	m_tab_rooms = new QPushButton(tr("Rooms"), online_page);
+	for (QPushButton* b : {tab_direct, m_tab_rooms})
+	{
+		b->setObjectName(QStringLiteral("Tab"));
+		b->setCheckable(true);
+		b->setCursor(Qt::PointingHandCursor);
+		tab_group->addButton(b);
+		tabs->addWidget(b);
+	}
 	tabs->addStretch(1);
 	online->addLayout(tabs);
 
@@ -337,25 +357,111 @@ RollbackLauncher::RollbackLauncher()
 	online->addWidget(room_hint);
 	online->addSpacing(6);
 
+	m_online_modes = new QStackedWidget(online_page);
+	online->addWidget(m_online_modes, 1);
+
+	// Direct: host waits on the port, the joiner types the host's address.
 	const int port = Host::GetBaseIntSettingValue(SECTION, "Port", DEFAULT_PORT);
+	QWidget* direct_page = new QWidget(m_online_modes);
+	QVBoxLayout* direct = new QVBoxLayout(direct_page);
+	direct->setContentsMargins(0, 0, 0, 0);
+	direct->setSpacing(12);
 	m_host_button = make_action(tr("HOST  (PLAYER 1)"));
 	m_host_button->setToolTip(tr("Waits for the other player on UDP port %1.\nThe port must be forwarded in your router.").arg(port));
-	online->addWidget(m_host_button);
+	direct->addWidget(m_host_button);
 	QLabel* host_hint = new QLabel(tr("Tell the other player your public IP address. Forward UDP port %1 in your router.").arg(port),
-		online_page);
+		direct_page);
 	host_hint->setObjectName(QStringLiteral("Hint"));
-	online->addWidget(host_hint);
-	online->addSpacing(6);
+	direct->addWidget(host_hint);
+	direct->addSpacing(6);
 
 	QHBoxLayout* join_row = new QHBoxLayout();
-	m_host_address = new QLineEdit(online_page);
+	m_host_address = new QLineEdit(direct_page);
 	m_host_address->setPlaceholderText(tr("Host IP address, e.g. 203.0.113.5"));
 	m_host_address->setText(QString::fromStdString(Host::GetBaseStringSettingValue(SECTION, "HostAddress", "")));
 	join_row->addWidget(m_host_address, 1);
 	m_join_button = make_action(tr("JOIN  (PLAYER 2)"));
 	join_row->addWidget(m_join_button);
-	online->addLayout(join_row);
-	online->addStretch(1);
+	direct->addLayout(join_row);
+	direct->addStretch(1);
+	m_online_modes->addWidget(direct_page);
+
+	// Rooms: the list of open rooms of this Mawarunco version on the lobby server.
+	QWidget* rooms_page = new QWidget(m_online_modes);
+	QVBoxLayout* rooms = new QVBoxLayout(rooms_page);
+	rooms->setContentsMargins(0, 0, 0, 0);
+	rooms->setSpacing(8);
+	m_room_list = new QTreeWidget(rooms_page);
+	m_room_list->setHeaderLabels({tr("HOST"), tr("DELAY"), tr("ROLLBACK"), tr("ACCESS"), tr("OPEN FOR")});
+	m_room_list->setRootIsDecorated(false);
+	m_room_list->setUniformRowHeights(true);
+	m_room_list->setAlternatingRowColors(true);
+	m_room_list->setSelectionMode(QAbstractItemView::SingleSelection);
+	m_room_list->setEditTriggers(QAbstractItemView::NoEditTriggers);
+	m_room_list->header()->setStretchLastSection(false);
+	m_room_list->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+	for (int column = 1; column < 5; column++)
+		m_room_list->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
+	m_room_list->setMinimumHeight(120);
+	rooms->addWidget(m_room_list, 1);
+	QHBoxLayout* rooms_status_row = new QHBoxLayout();
+	m_rooms_status = new QLabel(rooms_page);
+	m_rooms_status->setObjectName(QStringLiteral("Hint"));
+	m_rooms_status->setTextFormat(Qt::PlainText);
+	rooms_status_row->addWidget(m_rooms_status, 1);
+	QPushButton* rooms_refresh = new QPushButton(tr("Refresh"), rooms_page);
+	rooms_refresh->setObjectName(QStringLiteral("Tab"));
+	rooms_status_row->addWidget(rooms_refresh);
+	rooms->addLayout(rooms_status_row);
+	m_join_room_button = make_action(tr("JOIN ROOM  (PLAYER 2)"));
+	m_join_room_button->setEnabled(false);
+	rooms->addWidget(m_join_room_button);
+	rooms->addSpacing(4);
+	QHBoxLayout* create_row = new QHBoxLayout();
+	m_room_code = new QLineEdit(rooms_page);
+	m_room_code->setPlaceholderText(tr("Room code (optional, 4-16 letters/digits, for a private room)"));
+	m_room_code->setMaxLength(16);
+	m_room_code->setValidator(new QRegularExpressionValidator(QRegularExpression(QStringLiteral("[A-Za-z0-9]*")), m_room_code));
+	create_row->addWidget(m_room_code, 1);
+	m_create_room_button = make_action(tr("CREATE ROOM  (PLAYER 1)"));
+	create_row->addWidget(m_create_room_button);
+	rooms->addLayout(create_row);
+	QLabel* rooms_hint = new QLabel(tr("A room is listed with your name and settings, not your IP address. The joiner gets "
+									   "your address to connect. Hosting still needs UDP port %1 forwarded in your router.")
+										.arg(port),
+		rooms_page);
+	rooms_hint->setObjectName(QStringLiteral("Hint"));
+	rooms_hint->setWordWrap(true);
+	rooms->addWidget(rooms_hint);
+	m_online_modes->addWidget(rooms_page);
+
+	m_lobby = new LobbyClient(this);
+	m_room_refresh = new QTimer(this);
+	m_room_refresh->setInterval(5000);
+	connect(m_room_refresh, &QTimer::timeout, this, &RollbackLauncher::refreshRooms);
+	m_room_heartbeat = new QTimer(this);
+	m_room_heartbeat->setInterval(10000);
+	connect(m_room_heartbeat, &QTimer::timeout, this, &RollbackLauncher::sendHeartbeat);
+	connect(rooms_refresh, &QPushButton::clicked, this, &RollbackLauncher::refreshRooms);
+	connect(m_room_list, &QTreeWidget::itemSelectionChanged, this,
+		[this]() { m_join_room_button->setEnabled(!m_room_list->selectedItems().isEmpty() && m_create_room_button->isEnabled()); });
+	connect(m_room_list, &QTreeWidget::itemDoubleClicked, this, &RollbackLauncher::onJoinRoomClicked);
+	connect(m_join_room_button, &QPushButton::clicked, this, &RollbackLauncher::onJoinRoomClicked);
+	connect(m_create_room_button, &QPushButton::clicked, this, &RollbackLauncher::onCreateRoomClicked);
+	connect(m_room_code, &QLineEdit::returnPressed, this, &RollbackLauncher::onCreateRoomClicked);
+	auto select_tab = [this](bool rooms_tab) {
+		m_online_modes->setCurrentIndex(rooms_tab ? 1 : 0);
+		Host::SetBaseStringSettingValue(SECTION, "OnlineTab", rooms_tab ? "rooms" : "direct");
+		Host::CommitBaseSettingChanges();
+		updateRoomRefresh();
+		if (rooms_tab)
+			refreshRooms();
+	};
+	connect(tab_direct, &QPushButton::clicked, this, [select_tab]() { select_tab(false); });
+	connect(m_tab_rooms, &QPushButton::clicked, this, [select_tab]() { select_tab(true); });
+	const bool rooms_tab = Host::GetBaseStringSettingValue(SECTION, "OnlineTab", "direct") == "rooms";
+	(rooms_tab ? m_tab_rooms : tab_direct)->setChecked(true);
+	m_online_modes->setCurrentIndex(rooms_tab ? 1 : 0);
 
 	// ---- Page: training ----------------------------------------------------------------------------------
 	QVBoxLayout* training = nullptr;
@@ -566,6 +672,7 @@ RollbackLauncher::RollbackLauncher()
 		saveButtonLayout(FucButtons::Default());
 	});
 	connect(menu_quit, &QPushButton::clicked, this, &QWidget::close);
+	connect(m_pages, &QStackedWidget::currentChanged, this, &RollbackLauncher::updateRoomRefresh);
 
 	// Out of the way while a game runs, back when it has ended.
 	connect(g_emu_thread, &EmuThread::onVMStarted, this, &QWidget::hide);
@@ -838,6 +945,15 @@ void RollbackLauncher::hideEvent(QHideEvent* event)
 {
 	stopListening();
 	QWidget::hideEvent(event);
+	updateRoomRefresh();
+}
+
+void RollbackLauncher::showEvent(QShowEvent* event)
+{
+	QWidget::showEvent(event);
+	updateRoomRefresh();
+	if (m_room_refresh->isActive())
+		refreshRooms();
 }
 
 void RollbackLauncher::applyWindowSize()
@@ -1053,9 +1169,12 @@ void RollbackLauncher::onBrowseGame()
 
 void RollbackLauncher::showAgain()
 {
+	// The game has ended (or did not start): an own room is no longer open.
+	closeOwnRoom();
 	refreshStatus();
-	for (QPushButton* b : {m_host_button, m_join_button, m_practice_button})
+	for (QPushButton* b : {m_host_button, m_join_button, m_practice_button, m_create_room_button})
 		b->setEnabled(true);
+	m_join_room_button->setEnabled(!m_room_list->selectedItems().isEmpty());
 	show();
 	raise();
 	activateWindow();
@@ -1063,9 +1182,219 @@ void RollbackLauncher::showAgain()
 
 void RollbackLauncher::closeEvent(QCloseEvent* event)
 {
-	// Closing the launcher closes the program.
+	// Closing the launcher closes the program; take an own room off the list first (the lobby would drop it
+	// after 30 seconds anyway).
+	if (!m_room_id.isEmpty())
+	{
+		closeOwnRoom();
+		m_lobby->flush();
+	}
 	event->accept();
 	g_main_window->requestExit(false);
+}
+
+void RollbackLauncher::updateRoomRefresh()
+{
+	const bool shown = isVisible() && m_pages->currentWidget() == m_online_page && m_online_modes->currentIndex() == 1;
+	if (shown && !m_room_refresh->isActive())
+		m_room_refresh->start();
+	else if (!shown)
+		m_room_refresh->stop();
+}
+
+void RollbackLauncher::refreshRooms()
+{
+	if (m_rooms_pending)
+		return;
+	m_rooms_pending = true;
+	if (m_room_list->topLevelItemCount() == 0)
+		m_rooms_status->setText(tr("Loading rooms ..."));
+	m_lobby->listRooms([this](LobbyClient::Result<LobbyClient::RoomList> result) {
+		m_rooms_pending = false;
+		if (!result.value)
+		{
+			m_rooms_status->setText(result.error);
+			return;
+		}
+		// Keep the selection across refreshes.
+		const QList<QTreeWidgetItem*> selection = m_room_list->selectedItems();
+		const QString selected_id = selection.isEmpty() ? QString() : selection.first()->data(0, Qt::UserRole).toString();
+		m_room_list->clear();
+		for (const LobbyClient::Room& room : result.value->rooms)
+		{
+			// Names are plain item text (never rich text).
+			QTreeWidgetItem* item = new QTreeWidgetItem(m_room_list);
+			item->setText(0, room.host);
+			item->setText(1, QString::number(room.delay));
+			item->setText(2, QString::number(room.rollback));
+			item->setText(3, room.locked ? tr("code") : tr("open"));
+			item->setText(4, (room.age_seconds < 60) ? tr("%1 s").arg(room.age_seconds) : tr("%1 min").arg(room.age_seconds / 60));
+			item->setData(0, Qt::UserRole, room.id);
+			item->setData(0, Qt::UserRole + 1, room.locked);
+			for (int column = 1; column < 5; column++)
+				item->setTextAlignment(column, Qt::AlignCenter);
+			if (room.id == selected_id)
+				item->setSelected(true);
+		}
+		const int count = static_cast<int>(result.value->rooms.size());
+		QString text = (count == 0) ? tr("No open rooms. Create one, or wait for others.") : tr("%n open room(s).", nullptr, count);
+		if (result.value->playing > 0)
+			text += QLatin1Char(' ') + tr("%n match(es) running.", nullptr, result.value->playing);
+		m_rooms_status->setText(text);
+		m_join_room_button->setEnabled(!m_room_list->selectedItems().isEmpty() && m_create_room_button->isEnabled());
+	});
+}
+
+std::string RollbackLauncher::lobbyName()
+{
+	const std::string name = FucNames::Sanitize(m_player_name->text().toStdString());
+	if (name.empty())
+	{
+		QMessageBox::information(this, windowTitle(), tr("Please enter your name first. It is shown in the room list."));
+		m_player_name->setFocus();
+	}
+	return name;
+}
+
+void RollbackLauncher::onCreateRoomClicked()
+{
+	if (QtHost::IsVMValid() || !m_room_id.isEmpty() || !m_create_room_button->isEnabled())
+		return;
+	if (!refreshStatus())
+	{
+		QMessageBox::warning(this, windowTitle(), tr("BIOS or game missing (see below)."));
+		return;
+	}
+	const std::string name = lobbyName();
+	if (name.empty())
+		return;
+	const std::string code = m_room_code->text().trimmed().toStdString();
+	if (!code.empty() && (code.size() < 4 || code.size() > 16))
+	{
+		QMessageBox::information(this, windowTitle(), tr("A room code has 4 to 16 letters or digits."));
+		m_room_code->setFocus();
+		return;
+	}
+	const int port = Host::GetBaseIntSettingValue(SECTION, "Port", DEFAULT_PORT);
+	const int delay = selectedDelay();
+	const int rollback = selectedRollback();
+	m_create_room_button->setEnabled(false);
+	m_join_room_button->setEnabled(false);
+	m_rooms_status->setText(tr("Creating the room ..."));
+	m_lobby->createRoom(name, delay, rollback, port, code,
+		[this, port, delay, rollback](LobbyClient::Result<LobbyClient::CreatedRoom> result) {
+			if (!result.value)
+			{
+				m_create_room_button->setEnabled(true);
+				m_join_room_button->setEnabled(!m_room_list->selectedItems().isEmpty());
+				m_rooms_status->setText(result.error);
+				QMessageBox::warning(this, windowTitle(), tr("Could not create the room: %1").arg(result.error));
+				return;
+			}
+			m_room_id = result.value->id;
+			m_room_token = result.value->token;
+			m_room_guest.clear();
+			m_room_heartbeat->start();
+			// Same as HOST in the direct tab: wait for the joiner on the port.
+			if (!boot(fmt::format("host={},delay={},rollback={},boot", port, delay, rollback), nullptr))
+			{
+				closeOwnRoom();
+				m_create_room_button->setEnabled(true);
+				m_join_room_button->setEnabled(!m_room_list->selectedItems().isEmpty());
+			}
+		});
+}
+
+void RollbackLauncher::sendHeartbeat()
+{
+	if (m_room_id.isEmpty())
+	{
+		m_room_heartbeat->stop();
+		return;
+	}
+	m_lobby->heartbeat(m_room_id, m_room_token, [this, id = m_room_id](LobbyClient::Result<LobbyClient::Heartbeat> result) {
+		if (id != m_room_id)
+			return; // answer for a room that is already closed
+		if (!result.value)
+		{
+			// Keep trying; the lobby drops the room after 30 s without heartbeat.
+			Console.Warning(fmt::format("Lobby: heartbeat failed: {}", result.error.toStdString()));
+			return;
+		}
+		if (result.value->playing && !result.value->guest.isEmpty() && result.value->guest != m_room_guest)
+		{
+			m_room_guest = result.value->guest;
+			Host::AddIconOSDMessage("LobbyGuest", ICON_FA_NETWORK_WIRED,
+				fmt::format("Lobby: {} is joining your room.", m_room_guest.toStdString()), Host::OSD_INFO_DURATION);
+		}
+	});
+}
+
+void RollbackLauncher::closeOwnRoom()
+{
+	m_room_heartbeat->stop();
+	if (m_room_id.isEmpty())
+		return;
+	m_lobby->closeRoom(m_room_id, m_room_token);
+	m_room_id.clear();
+	m_room_token.clear();
+	m_room_guest.clear();
+}
+
+void RollbackLauncher::onJoinRoomClicked()
+{
+	if (QtHost::IsVMValid() || !m_room_id.isEmpty() || m_room_list->selectedItems().isEmpty() ||
+		!m_create_room_button->isEnabled())
+	{
+		return;
+	}
+	if (!refreshStatus())
+	{
+		QMessageBox::warning(this, windowTitle(), tr("BIOS or game missing (see below)."));
+		return;
+	}
+	const std::string name = lobbyName();
+	if (name.empty())
+		return;
+	const QTreeWidgetItem* item = m_room_list->selectedItems().first();
+	const QString id = item->data(0, Qt::UserRole).toString();
+	std::string code;
+	if (item->data(0, Qt::UserRole + 1).toBool())
+	{
+		bool ok = false;
+		const QString entered = QInputDialog::getText(this, windowTitle(), tr("Room code for the room of %1:").arg(item->text(0)),
+			QLineEdit::Normal, QString(), &ok).trimmed();
+		if (!ok)
+			return;
+		static const QRegularExpression valid(QStringLiteral("^[A-Za-z0-9]{4,16}$"));
+		if (!valid.match(entered).hasMatch())
+		{
+			QMessageBox::information(this, windowTitle(), tr("A room code has 4 to 16 letters or digits."));
+			return;
+		}
+		code = entered.toStdString();
+	}
+	m_create_room_button->setEnabled(false);
+	m_join_room_button->setEnabled(false);
+	m_rooms_status->setText(tr("Joining ..."));
+	m_lobby->joinRoom(id, name, code, [this](LobbyClient::Result<LobbyClient::JoinInfo> result) {
+		if (!result.value)
+		{
+			m_create_room_button->setEnabled(true);
+			m_join_room_button->setEnabled(!m_room_list->selectedItems().isEmpty());
+			m_rooms_status->setText(result.error);
+			QMessageBox::warning(this, windowTitle(), tr("Could not join the room: %1").arg(result.error));
+			refreshRooms();
+			return;
+		}
+		// Same as JOIN in the direct tab, with the address from the lobby (not shown, not stored).
+		const LobbyClient::JoinInfo& info = *result.value;
+		if (!boot(fmt::format("join={}:{},delay={},rollback={},boot", info.address, info.port, info.delay, info.rollback), nullptr))
+		{
+			m_create_room_button->setEnabled(true);
+			m_join_room_button->setEnabled(!m_room_list->selectedItems().isEmpty());
+		}
+	});
 }
 
 void RollbackLauncher::onHostClicked()
@@ -1105,15 +1434,15 @@ void RollbackLauncher::onKeyConfigClicked()
 	g_main_window->openControllerSettings();
 }
 
-void RollbackLauncher::boot(const std::string& netplay_spec, const char* shortcut)
+bool RollbackLauncher::boot(const std::string& netplay_spec, const char* shortcut)
 {
 	if (!refreshStatus())
 	{
 		QMessageBox::warning(this, windowTitle(), tr("BIOS or game missing (see below)."));
-		return;
+		return false;
 	}
 	if (QtHost::IsVMValid())
-		return;
+		return false;
 
 	// Remembered for the next start.
 	Host::SetBaseIntSettingValue(SECTION, "Delay", selectedDelay());
@@ -1144,17 +1473,17 @@ void RollbackLauncher::boot(const std::string& netplay_spec, const char* shortcu
 	if (!netplay_spec.empty() && !Netplay::SetLaunchOptions(netplay_spec, &error))
 	{
 		QMessageBox::critical(this, windowTitle(), QString::fromStdString(error.GetDescription()));
-		return;
+		return false;
 	}
 	const char* script = shortcut ? shortcut : "vs2p";
 	if (netplay_spec.empty() && !BootShortcut::Request(script, &error))
 	{
 		QMessageBox::critical(this, windowTitle(), QString::fromStdString(error.GetDescription()));
-		return;
+		return false;
 	}
 
 	// Stays visible until the game runs (onVMStarted hides it). If the boot fails, the buttons come back.
-	for (QPushButton* b : {m_host_button, m_join_button, m_practice_button})
+	for (QPushButton* b : {m_host_button, m_join_button, m_practice_button, m_create_room_button, m_join_room_button})
 		b->setEnabled(false);
 	QTimer::singleShot(15000, this, [this]() {
 		if (!QtHost::IsVMValid() && isVisible())
@@ -1165,6 +1494,7 @@ void RollbackLauncher::boot(const std::string& netplay_spec, const char* shortcu
 	params->filename = m_game_path;
 	params->fullscreen = fullscreen;
 	g_emu_thread->startVM(std::move(params));
+	return true;
 }
 
 #include "moc_RollbackLauncher.cpp"

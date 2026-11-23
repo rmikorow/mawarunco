@@ -43,6 +43,7 @@
     <ClCompile Include="AsyncDialogs.cpp" />
     <ClCompile Include="QtHost.cpp" />
     <ClCompile Include="RollbackLauncher.cpp" />
+    <ClCompile Include="LobbyClient.cpp" />
     <ClCompile Include="MainWindow.cpp" />
     <ClCompile Include="$(IntDir)qrc_resources.cpp">
       <Filter>Resources</Filter>
@@ -401,6 +402,7 @@
     </QtMoc>
     <QtMoc Include="QtHost.h" />
     <QtMoc Include="RollbackLauncher.h" />
+    <QtMoc Include="LobbyClient.h" />
     <QtMoc Include="CoverDownloadDialog.h" />
     <QtMoc Include="QtProgressCallback.h" />
     <QtMoc Include="ShortcutCreationDialog.h" />

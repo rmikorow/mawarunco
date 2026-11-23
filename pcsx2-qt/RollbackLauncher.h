@@ -23,9 +23,11 @@ class QLineEdit;
 class QPushButton;
 class QTimer;
 class QPropertyAnimation;
+class QTreeWidget;
+class LobbyClient;
 
 // Rollback fork: start window for players of the Fate/unlimited codes package. Replaces the PCSX2 main
-// window while no game runs ([UI] RollbackLauncher = true): netplay (host or join with input delay),
+// window while no game runs ([UI] RollbackLauncher = true): netplay (direct IP or rooms on the lobby server),
 // practice, and the game's button config (kept per player, written into the game) plus controller mapping. The game boots from the player's own disc image in the "game" folder with the
 // BIOS from the "bios" folder, straight into the chosen mode (boot shortcut).
 //
@@ -47,6 +49,7 @@ public:
 protected:
 	void closeEvent(QCloseEvent* event) override;
 	void hideEvent(QHideEvent* event) override;
+	void showEvent(QShowEvent* event) override;
 	bool eventFilter(QObject* watched, QEvent* event) override;
 
 private Q_SLOTS:
@@ -59,12 +62,23 @@ private Q_SLOTS:
 	void applyWindowSize();
 	void onBrowseBios();
 	void onBrowseGame();
+	void refreshRooms();
+	void onCreateRoomClicked();
+	void onJoinRoomClicked();
+	void sendHeartbeat();
 
 private:
 	/// Finds BIOS and disc image and updates the status lines. Returns true if both are there.
 	bool refreshStatus();
 	/// Saves the chosen delay and address, sets the BIOS and both controller ports, boots the game.
-	void boot(const std::string& netplay_spec, const char* shortcut);
+	/// Returns false if the boot could not be started.
+	bool boot(const std::string& netplay_spec, const char* shortcut);
+	/// The player's name for the lobby, or empty after telling the player to enter one.
+	std::string lobbyName();
+	/// Removes the room this player hosts from the lobby (game ended, boot failed, program closes).
+	void closeOwnRoom();
+	/// Starts or stops the room list refresh (only while the rooms tab is shown).
+	void updateRoomRefresh();
 	int selectedDelay() const;
 	int selectedRollback() const;
 	/// Takes over the BIOS and disc image chosen in the installer (inis\launcher-setup.txt).
@@ -97,6 +111,22 @@ private:
 	QPushButton* m_host_button = nullptr;
 	QPushButton* m_join_button = nullptr;
 	QPushButton* m_practice_button = nullptr;
+	// Online page: direct IP or rooms.
+	QWidget* m_online_page = nullptr;
+	QStackedWidget* m_online_modes = nullptr;
+	QPushButton* m_tab_rooms = nullptr;
+	QTreeWidget* m_room_list = nullptr;
+	QLabel* m_rooms_status = nullptr;
+	QLineEdit* m_room_code = nullptr;
+	QPushButton* m_create_room_button = nullptr;
+	QPushButton* m_join_room_button = nullptr;
+	LobbyClient* m_lobby = nullptr;
+	QTimer* m_room_refresh = nullptr;   // room list, every few seconds while shown
+	QTimer* m_room_heartbeat = nullptr; // keeps the own room listed
+	bool m_rooms_pending = false;
+	QString m_room_id;    // room this player hosts, empty = none
+	QString m_room_token; // proves to the lobby that the room is ours
+	QString m_room_guest; // joiner announced by the lobby (shown once)
 	// Button config page: one row per action (index = action, 0 unused) with the glyph of its button.
 	std::array<QPushButton*, FucButtons::NUM_ACTIONS> m_action_rows = {};
 	std::array<QLabel*, FucButtons::NUM_ACTIONS> m_action_glyphs = {};
