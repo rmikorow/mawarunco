@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mawarunco</title>
+<meta name="description" content="Rollback netplay for Fate/unlimited codes (PS2). An unofficial, open-source PCSX2 fork.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a0c14'/%3E%3Ccircle cx='16' cy='16' r='10' fill='none' stroke='%23c8a24a' stroke-width='2'/%3E%3Cpath d='M16 7 L24 21 L8 21 Z' fill='none' stroke='%23c8102e' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0d0a10;
+    --bg2: #170c13;
+    --panel: #1c1118;
+    --line: #3a2430;
+    --text: #efe6d6;
+    --muted: #a99f93;
+    --gold: #c8a24a;
+    --red: #c8102e;
+    --red2: #e0303f;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 "Segoe UI", system-ui, -apple-system, Helvetica, Arial, sans-serif;
+  }
+  a { color: var(--gold); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+
+  header.top {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(13, 10, 16, 0.88);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  header.top .wrap { display: flex; align-items: center; gap: 24px; height: 56px; }
+  .brand { font-weight: 800; letter-spacing: 4px; color: var(--text); text-decoration: none; }
+  nav { margin-left: auto; display: flex; gap: 20px; }
+  nav a { color: var(--muted); text-decoration: none; font-size: 14px; letter-spacing: 1px; text-transform: uppercase; }
+  nav a:hover { color: var(--gold); }
+
+  .hero {
+    position: relative; overflow: hidden;
+    background:
+      radial-gradient(ellipse at 80% 50%, rgba(200, 16, 46, 0.35), transparent 60%),
+      linear-gradient(135deg, var(--bg) 0%, var(--bg2) 55%, #3a0e1b 100%);
+    border-bottom: 1px solid var(--line);
+  }
+  .hero .wrap { padding-top: 96px; padding-bottom: 96px; position: relative; }
+  .hero svg.deco { position: absolute; right: -40px; top: 50%; transform: translateY(-50%); width: 420px; opacity: 0.5; pointer-events: none; }
+  .hero h1 { margin: 0; font-size: clamp(44px, 9vw, 88px); font-weight: 800; letter-spacing: 0.12em; line-height: 1.05; }
+  .hero .rule { width: min(520px, 80%); height: 2px; margin: 22px 0; background: linear-gradient(90deg, var(--gold), transparent); }
+  .hero .tag { margin: 0; color: var(--gold); font-weight: 600; letter-spacing: 0.25em; text-transform: uppercase; font-size: clamp(13px, 2.2vw, 18px); }
+  .hero p.lead { max-width: 580px; color: var(--muted); font-size: 18px; margin: 22px 0 34px; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 14px; }
+  .btn {
+    display: inline-block; padding: 14px 26px; border-radius: 4px;
+    font-weight: 700; letter-spacing: 2px; text-transform: uppercase; font-size: 14px; text-decoration: none;
+    border: 1px solid var(--gold); color: var(--gold);
+  }
+  .btn.primary { background: var(--red); border-color: var(--red); color: #fff; }
+  .btn.primary:hover { background: var(--red2); border-color: var(--red2); }
+  .btn:not(.primary):hover { background: rgba(200, 162, 74, 0.12); }
+  .small { font-size: 13px; color: var(--muted); margin-top: 16px; }
+
+  section { padding: 72px 0; border-bottom: 1px solid var(--line); }
+  section:nth-of-type(even) { background: var(--bg2); }
+  h2 { font-size: 14px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--gold); margin: 0 0 8px; }
+  h3.big { font-size: clamp(26px, 4vw, 36px); margin: 0 0 32px; font-weight: 700; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--red); padding: 22px; border-radius: 4px; }
+  .card h4 { margin: 0 0 8px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .num { color: var(--gold); font-weight: 700; }
+
+  ol.steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 18px; }
+  ol.steps li { counter-increment: s; position: relative; padding: 20px 22px 20px 74px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; }
+  ol.steps li::before {
+    content: counter(s); position: absolute; left: 22px; top: 18px;
+    width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--gold);
+    color: var(--gold); font-weight: 800; display: grid; place-items: center;
+  }
+  ol.steps strong { display: block; margin-bottom: 4px; }
+  ol.steps span { color: var(--muted); }
+  code { background: #261822; border: 1px solid var(--line); padding: 1px 6px; border-radius: 3px; font-size: 0.92em; }
+
+  ul.checks { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+  ul.checks li { padding-left: 32px; position: relative; color: var(--muted); }
+  ul.checks li strong { color: var(--text); }
+  ul.checks li::before { content: ""; position: absolute; left: 4px; top: 7px; width: 12px; height: 7px; border-left: 2px solid var(--gold); border-bottom: 2px solid var(--gold); transform: rotate(-45deg); }
+
+  details { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 0 20px; margin-bottom: 12px; }
+  summary { cursor: pointer; padding: 16px 0; font-weight: 600; }
+  details p { margin: 0 0 16px; color: var(--muted); }
+
+  footer { padding: 40px 0 60px; color: var(--muted); font-size: 13px; }
+  footer p { margin: 0 0 10px; max-width: 820px; }
+
+  @media (max-width: 640px) {
+    nav { display: none; }
+    .hero .wrap { padding-top: 64px; padding-bottom: 64px; }
+    .hero svg.deco { width: 280px; right: -90px; opacity: 0.3; }
+    section { padding: 52px 0; }
+    ol.steps li { padding-left: 64px; }
+    ol.steps li::before { left: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#">MAWARUNCO</a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#play">How to play</a>
+      <a href="#security">Security</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/rmikorow/mawarunco">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <svg class="deco" viewBox="0 0 300 300" aria-hidden="true">
+      <g fill="none" stroke="#c8a24a" stroke-opacity="0.45">
+        <circle cx="150" cy="150" r="140"/>
+        <circle cx="150" cy="150" r="110"/>
+        <circle cx="150" cy="150" r="72" stroke-opacity="0.7"/>
+        <path d="M150 10 L271 220 L29 220 Z"/>
+        <path d="M150 290 L29 80 L271 80 Z"/>
+      </g>
+    </svg>
+    <h1>MAWARUNCO</h1>
+    <div class="rule"></div>
+    <p class="tag">Rollback netplay for Fate/unlimited codes</p>
+    <p class="lead">Play the PS2 version online with rollback netcode and lower input latency than on the original console. Free and open source.</p>
+    <div class="buttons">
+      <a class="btn primary" href="https://github.com/rmikorow/mawarunco/releases/latest">Download for Windows</a>
+      <a class="btn" href="https://github.com/rmikorow/mawarunco">View the source</a>
+    </div>
+    <p class="small">Unofficial PCSX2 fork · Windows 10/11 (64-bit) · You need your own PS2 BIOS and your own copy of the game.</p>
+  </div>
+</div>
+
+<section id="features">
+  <div class="wrap">
+    <h2>Features</h2>
+    <h3 class="big">Built for online matches</h3>
+    <div class="grid">
+      <div class="card"><h4>Rollback netplay</h4><p>Direct IP, no VPN. The host forwards one UDP port; joining needs nothing. The host sets input delay and rollback depth for the room.</p></div>
+      <div class="card"><h4>Low input latency</h4><p>Input-to-screen latency went from <span class="num">33.6 ms</span> to <span class="num">10.6 ms</span>. Run-ahead hides the game's internal lag, offline and online.</p></div>
+      <div class="card"><h4>Straight to character select</h4><p>No savestates to share. The game boots straight to <em>Vs. 2P</em> or <em>Practice</em>, with all characters unlocked.</p></div>
+      <div class="card"><h4>Your buttons, always</h4><p>Set the game's button config once in the start window. You keep your layout as player 1 or player 2.</p></div>
+      <div class="card"><h4>Player names</h4><p>Your names appear above the health bars, next to the win counter.</p></div>
+      <div class="card"><h4>Simple setup</h4><p>An installer that needs no admin rights. It asks for your BIOS and game, and updates keep your settings.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="play">
+  <div class="wrap">
+    <h2>How to play</h2>
+    <h3 class="big">From download to first match</h3>
+    <ol class="steps">
+      <li><strong>Install</strong><span>Download <code>Mawarunco-Setup</code> from the latest release and run it. Choose your PS2 BIOS file and your disc image of Fate/unlimited codes.</span></li>
+      <li><strong>Set up</strong><span>Start Mawarunco. Under <em>Button config</em>, set up your controller and buttons. Under <em>Online</em>, enter your name.</span></li>
+      <li><strong>Host or join</strong><span>The host forwards UDP port <code>7000</code> in their router, clicks <em>HOST</em> and shares their public IP address. The other player enters that address and clicks <em>JOIN</em>.</span></li>
+      <li><strong>Fight</strong><span>Both games boot to character select. Both players need the same Mawarunco version and the same BIOS version.</span></li>
+    </ol>
+  </div>
+</section>
+
+<section id="security">
+  <div class="wrap">
+    <h2>Security and transparency</h2>
+    <h3 class="big">Open source, so you can check it</h3>
+    <ul class="checks">
+      <li><strong>Netplay is the only network code added.</strong> It opens one UDP port during an online session. It sends a short handshake and then controller input and checksums. Received input is only used as button values.</li>
+      <li><strong>Nothing is downloaded or started.</strong> No other programs, no registry changes, no autostart. The PCSX2 auto updater is turned off.</li>
+      <li><strong>No game files included.</strong> No BIOS, disc image or game data are in the repository or the downloads.</li>
+      <li><strong>Releases you can verify.</strong> Every release is built from a tagged commit, with SHA-256 checksums for every file.</li>
+    </ul>
+    <p class="small">Details, with links to the code to check: <a href="https://github.com/rmikorow/mawarunco#security-and-transparency">README on GitHub</a>.</p>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <h2>FAQ</h2>
+    <h3 class="big">Questions</h3>
+    <details><summary>Where do I get the BIOS and the game?</summary><p>Dump them from your own PS2 and your own disc. Mawarunco does not include or link to them.</p></details>
+    <details><summary>Windows warns me about the installer.</summary><p>The files are not code-signed, so SmartScreen may warn. Click "More info", then "Run anyway". You can compare the file with the SHA-256 checksum on the release page.</p></details>
+    <details><summary>Do I need to forward a port?</summary><p>Only the host does: UDP 7000. The joining player needs nothing.</p></details>
+    <details><summary>The game desynced. What now?</summary><p>Check that both players use the same Mawarunco version and the same BIOS version. Mawarunco warns if the BIOS versions differ. If it still happens, open an issue on GitHub and attach both players' <code>logs</code> folders.</p></details>
+    <details><summary>Is this the official PCSX2?</summary><p>No. Mawarunco is an unofficial fork made for one game. Please do not report problems with it to the PCSX2 team.</p></details>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>Mawarunco is free software under the GPL-3.0-or-later, based on <a href="https://github.com/PCSX2/pcsx2">PCSX2</a>. All credit for the emulator goes to the PCSX2 team. It is not affiliated with or supported by the PCSX2 team.</p>
+    <p>Fate/unlimited codes is a trademark of its owners. This project is not affiliated with Capcom, TYPE-MOON or cavia.</p>
+    <p>Developed with the help of an AI coding assistant. <a href="https://github.com/rmikorow/mawarunco">Source on GitHub</a>.</p>
+  </div>
+</footer>
+
+</body>
+</html>
