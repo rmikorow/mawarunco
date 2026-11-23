@@ -44,6 +44,7 @@
 #include <QtCore/QSignalBlocker>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QButtonGroup>
+#include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QStackedWidget>
@@ -59,6 +60,8 @@
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QScrollArea>
+#include <QtWidgets/QScrollBar>
 #include <QtWidgets/QVBoxLayout>
 
 #include <array>
@@ -102,6 +105,16 @@ QLabel#Subtitle { color: #c8a24a; font-size: 12px; font-weight: 600; letter-spac
 QLabel#PageTitle { color: #f3e7c4; font-size: 18px; font-weight: 700; letter-spacing: 2px; }
 QLabel#Hint { color: #a99f93; font-size: 12px; }
 QLabel#Status { color: #cfc6b8; font-size: 12px; }
+QLabel#Section { color: #c8a24a; font-size: 13px; font-weight: 800; letter-spacing: 3px; padding-top: 4px; }
+QLabel#Counter { color: #cfc6b8; font-size: 12px; font-weight: 600; }
+QCheckBox { color: #e9e2d6; font-size: 13px; spacing: 8px; }
+QScrollArea#PageScroll { background: transparent; border: none; }
+QScrollArea#PageScroll > QWidget > QWidget { background: transparent; }
+QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+QScrollBar::handle:vertical { background: rgba(200, 162, 74, 90); border-radius: 4px; min-height: 30px; }
+QScrollBar::handle:vertical:hover { background: rgba(200, 162, 74, 160); }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
 QFrame#Rule { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #c8a24a, stop:1 transparent); max-height: 1px; min-height: 1px; border: none; }
 QFrame#Panel { background: rgba(10, 6, 10, 150); border: 1px solid rgba(200, 162, 74, 60); border-radius: 6px; }
 
@@ -255,41 +268,43 @@ RollbackLauncher::RollbackLauncher()
 	};
 
 	// ---- Page: online ------------------------------------------------------------------------------------
+	// One scrollable page: rooms first (the usual way to find a game), then the settings the host decides,
+	// then the direct connection by IP address.
 	QVBoxLayout* online = nullptr;
 	QFrame* online_page = make_page(tr("ONLINE  -  VS. 2P"),
 		tr("Both players boot their own copy of the game to the character select, all characters unlocked. "
 		   "Each player plays with their own button config."),
 		&online);
+	QScrollArea* online_scroll = new QScrollArea(this);
+	online_scroll->setObjectName(QStringLiteral("PageScroll"));
+	online_scroll->setWidgetResizable(true);
+	online_scroll->setFrameShape(QFrame::NoFrame);
+	online_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+	online_scroll->setWidget(online_page);
+	m_online_page = online_scroll;
+	const int port = Host::GetBaseIntSettingValue(SECTION, "Port", DEFAULT_PORT);
 
-	m_online_page = online_page;
+	auto make_section = [online_page](const QString& text) {
+		QLabel* l = new QLabel(text, online_page);
+		l->setObjectName(QStringLiteral("Section"));
+		return l;
+	};
+	auto make_hint = [online_page](const QString& text) {
+		QLabel* l = new QLabel(text, online_page);
+		l->setObjectName(QStringLiteral("Hint"));
+		l->setWordWrap(true);
+		return l;
+	};
 
-	// Direct IP, or rooms on the lobby server (it lists rooms and hands the host's address to the joiner).
-	QHBoxLayout* tabs = new QHBoxLayout();
-	tabs->setSpacing(0);
-	QButtonGroup* tab_group = new QButtonGroup(this);
-	QPushButton* tab_direct = new QPushButton(tr("Direct (IP)"), online_page);
-	m_tab_rooms = new QPushButton(tr("Rooms"), online_page);
-	for (QPushButton* b : {tab_direct, m_tab_rooms})
-	{
-		b->setObjectName(QStringLiteral("Tab"));
-		b->setCheckable(true);
-		b->setCursor(Qt::PointingHandCursor);
-		tab_group->addButton(b);
-		tabs->addWidget(b);
-	}
-	tabs->addStretch(1);
-	online->addLayout(tabs);
-
-	// Player name, shown above the health bar in versus ("<name> / <wins>") for both players.
-	QHBoxLayout* name_row = new QHBoxLayout();
-	name_row->setSpacing(0);
-	QLabel* name_label = new QLabel(tr("Name"), online_page);
-	name_label->setMinimumWidth(70);
-	name_row->addWidget(name_label);
+	// Player name (shown above the health bar and in the room list) and country (room list).
+	QGridLayout* you = new QGridLayout();
+	you->setHorizontalSpacing(10);
+	you->setVerticalSpacing(8);
+	you->addWidget(new QLabel(tr("Name"), online_page), 0, 0);
 	m_player_name = new QLineEdit(online_page);
 	m_player_name->setMaxLength(static_cast<int>(FucNames::MAX_LENGTH));
-	m_player_name->setMaximumWidth(220);
 	m_player_name->setPlaceholderText(tr("YOUR NAME"));
+	m_player_name->setToolTip(tr("Shown above your health bar and in the room list"));
 	m_player_name->setValidator(new QRegularExpressionValidator(QRegularExpression(QStringLiteral("[A-Za-z0-9 .!?-]*")), m_player_name));
 	m_player_name->setText(QString::fromStdString(FucNames::Sanitize(Host::GetBaseStringSettingValue(SECTION, "PlayerName", ""))));
 	connect(m_player_name, &QLineEdit::textEdited, this, [this](const QString& text) {
@@ -298,23 +313,11 @@ RollbackLauncher::RollbackLauncher()
 		m_player_name->setText(text.toUpper());
 		m_player_name->setCursorPosition(cursor);
 	});
-	name_row->addWidget(m_player_name);
-		QLabel* name_hint = new QLabel(tr("   shown above your health bar"), online_page);
-	name_hint->setObjectName(QStringLiteral("Hint"));
-	name_row->addWidget(name_hint);
-	name_row->addStretch(1);
-	online->addLayout(name_row);
-
-	// Country, shown next to the name in the room list. Preselected from the Windows region (no IP lookup);
-	// the player may change it or hide it.
-	QHBoxLayout* country_row = new QHBoxLayout();
-	country_row->setSpacing(0);
-	QLabel* country_label = new QLabel(tr("Country"), online_page);
-	country_label->setMinimumWidth(70);
-	country_row->addWidget(country_label);
+	you->addWidget(m_player_name, 0, 1);
+	you->addWidget(new QLabel(tr("Country"), online_page), 0, 2);
+	// Preselected from the Windows region (no IP lookup); the player may change or hide it.
 	m_country = new QComboBox(online_page);
-	m_country->setMinimumWidth(220);
-	m_country->setMaximumWidth(220);
+	m_country->setToolTip(tr("Shown next to your name in the room list"));
 	{
 		std::vector<std::pair<QString, QString>> countries; // name, code
 		for (int t = 1; t <= static_cast<int>(QLocale::LastTerritory); t++)
@@ -334,25 +337,77 @@ RollbackLauncher::RollbackLauncher()
 		const std::string saved = Host::GetBaseStringSettingValue(SECTION, "Country", "auto");
 		const QString wanted = (saved == "auto") ? QLocale::territoryToCode(QLocale::system().territory()) :
 		                                           QString::fromStdString(saved);
-		const int index = m_country->findData(wanted);
-		m_country->setCurrentIndex(std::max(index, 0));
+		m_country->setCurrentIndex(std::max(m_country->findData(wanted), 0));
 	}
 	connect(m_country, &QComboBox::currentIndexChanged, this, [this]() {
 		Host::SetBaseStringSettingValue(SECTION, "Country", m_country->currentData().toString().toUtf8().constData());
 		Host::CommitBaseSettingChanges();
 	});
-	country_row->addWidget(m_country);
-	QLabel* country_hint = new QLabel(tr("   shown in the room list when you create a room"), online_page);
-	country_hint->setObjectName(QStringLiteral("Hint"));
-	country_row->addWidget(country_hint);
-	country_row->addStretch(1);
-	online->addLayout(country_row);
+	you->addWidget(m_country, 0, 3);
+	you->setColumnStretch(1, 1);
+	you->setColumnStretch(3, 1);
+	online->addLayout(you);
+	online->addSpacing(6);
 
+	// ---- Rooms ----
+	QHBoxLayout* rooms_header = new QHBoxLayout();
+	rooms_header->addWidget(make_section(tr("ROOMS")));
+	rooms_header->addStretch(1);
+	m_online_count = new QLabel(online_page);
+	m_online_count->setObjectName(QStringLiteral("Counter"));
+	m_online_count->setToolTip(tr("Players with Mawarunco open on the room list, waiting in a room or in a match"));
+	rooms_header->addWidget(m_online_count);
+	online->addLayout(rooms_header);
+	m_room_list = new QTreeWidget(online_page);
+	m_room_list->setHeaderLabels({tr("HOST"), tr("COUNTRY"), tr("DELAY"), tr("ROLLBACK"), tr("ACCESS"), tr("OPEN FOR")});
+	m_room_list->setRootIsDecorated(false);
+	m_room_list->setUniformRowHeights(true);
+	m_room_list->setAlternatingRowColors(true);
+	m_room_list->setSelectionMode(QAbstractItemView::SingleSelection);
+	m_room_list->setEditTriggers(QAbstractItemView::NoEditTriggers);
+	m_room_list->header()->setStretchLastSection(false);
+	m_room_list->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+	for (int column = 1; column < 6; column++)
+		m_room_list->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
+	m_room_list->setMinimumHeight(170);
+	online->addWidget(m_room_list);
+	QHBoxLayout* rooms_status_row = new QHBoxLayout();
+	m_rooms_status = new QLabel(online_page);
+	m_rooms_status->setObjectName(QStringLiteral("Hint"));
+	m_rooms_status->setTextFormat(Qt::PlainText);
+	rooms_status_row->addWidget(m_rooms_status, 1);
+	QPushButton* rooms_refresh = new QPushButton(tr("Refresh"), online_page);
+	rooms_refresh->setObjectName(QStringLiteral("Tab"));
+	rooms_status_row->addWidget(rooms_refresh);
+	online->addLayout(rooms_status_row);
+	m_join_room_button = make_action(tr("JOIN ROOM  (PLAYER 2)"));
+	m_join_room_button->setEnabled(false);
+	online->addWidget(m_join_room_button);
+	online->addSpacing(4);
+	QHBoxLayout* create_row = new QHBoxLayout();
+	m_room_code = new QLineEdit(online_page);
+	m_room_code->setPlaceholderText(tr("Room code (optional, for a private room)"));
+	m_room_code->setToolTip(tr("4 to 16 letters or digits. Only players who know the code can join."));
+	m_room_code->setMaxLength(16);
+	m_room_code->setValidator(new QRegularExpressionValidator(QRegularExpression(QStringLiteral("[A-Za-z0-9]*")), m_room_code));
+	create_row->addWidget(m_room_code, 1);
+	m_create_room_button = make_action(tr("CREATE ROOM  (PLAYER 1)"));
+	create_row->addWidget(m_create_room_button);
+	online->addLayout(create_row);
+	online->addWidget(make_hint(tr("The room list shows your name, country and settings, never your IP address. The player who "
+								   "joins your room gets your IP address to connect to you, as with a direct connection. "
+								   "Hosting needs UDP port %1 forwarded in your router.")
+									.arg(port)));
+	online->addSpacing(10);
+
+	// ---- Settings the host decides (rooms and direct) ----
+	online->addWidget(make_section(tr("WHEN YOU HOST")));
+	QGridLayout* host_settings = new QGridLayout();
+	host_settings->setHorizontalSpacing(0);
+	host_settings->setVerticalSpacing(8);
+	host_settings->addWidget(new QLabel(tr("Delay"), online_page), 0, 0);
 	QHBoxLayout* delay_row = new QHBoxLayout();
 	delay_row->setSpacing(0);
-	QLabel* delay_label = new QLabel(tr("Delay"), online_page);
-	delay_label->setMinimumWidth(70);
-	delay_row->addWidget(delay_label);
 	m_delay_group = new QButtonGroup(this);
 	const int saved_delay = std::clamp(Host::GetBaseIntSettingValue(SECTION, "Delay", DEFAULT_DELAY), 0, MAX_DELAY);
 	for (int i = 0; i <= MAX_DELAY; i++)
@@ -369,14 +424,11 @@ RollbackLauncher::RollbackLauncher()
 	delay_hint->setObjectName(QStringLiteral("Hint"));
 	delay_row->addWidget(delay_hint);
 	delay_row->addStretch(1);
-	online->addLayout(delay_row);
-
+	host_settings->addLayout(delay_row, 0, 1);
 	// Rollback depth: how many frames the game may predict before it waits for the other player.
+	host_settings->addWidget(new QLabel(tr("Rollback"), online_page), 1, 0);
 	QHBoxLayout* rollback_row = new QHBoxLayout();
 	rollback_row->setSpacing(0);
-	QLabel* rollback_label = new QLabel(tr("Rollback"), online_page);
-	rollback_label->setMinimumWidth(70);
-	rollback_row->addWidget(rollback_label);
 	m_rollback_group = new QButtonGroup(this);
 	const int saved_rollback = std::clamp(Host::GetBaseIntSettingValue(SECTION, "Rollback", DEFAULT_ROLLBACK), 1, MAX_ROLLBACK);
 	for (int i = 1; i <= MAX_ROLLBACK; i++)
@@ -389,96 +441,38 @@ RollbackLauncher::RollbackLauncher()
 		m_rollback_group->addButton(b, i);
 		rollback_row->addWidget(b);
 	}
-	QLabel* rollback_hint = new QLabel(tr("   frames  -  more helps on high ping, needs a faster PC"), online_page);
+	QLabel* rollback_hint = new QLabel(tr("   frames  -  more helps on high ping"), online_page);
 	rollback_hint->setObjectName(QStringLiteral("Hint"));
 	rollback_row->addWidget(rollback_hint);
 	rollback_row->addStretch(1);
-	online->addLayout(rollback_row);
-	QLabel* room_hint = new QLabel(tr("The host decides delay and rollback for both players; when you join, the host's "
-									  "values are used."),
-		online_page);
-	room_hint->setObjectName(QStringLiteral("Hint"));
-	online->addWidget(room_hint);
-	online->addSpacing(6);
+	host_settings->addLayout(rollback_row, 1, 1);
+	host_settings->setColumnMinimumWidth(0, 80);
+	online->addLayout(host_settings);
+	online->addWidget(make_hint(tr("The host decides delay and rollback for both players; when you join, the host's values are used.")));
+	m_show_ping = new QCheckBox(tr("Show the ping to the other player in the game"), online_page);
+	m_show_ping->setChecked(Host::GetBaseBoolSettingValue(SECTION, "ShowPing", true));
+	connect(m_show_ping, &QCheckBox::toggled, this, [](bool on) {
+		Host::SetBaseBoolSettingValue(SECTION, "ShowPing", on);
+		Host::CommitBaseSettingChanges();
+	});
+	online->addWidget(m_show_ping);
+	online->addSpacing(10);
 
-	m_online_modes = new QStackedWidget(online_page);
-	online->addWidget(m_online_modes, 1);
-
-	// Direct: host waits on the port, the joiner types the host's address.
-	const int port = Host::GetBaseIntSettingValue(SECTION, "Port", DEFAULT_PORT);
-	QWidget* direct_page = new QWidget(m_online_modes);
-	QVBoxLayout* direct = new QVBoxLayout(direct_page);
-	direct->setContentsMargins(0, 0, 0, 0);
-	direct->setSpacing(12);
+	// ---- Direct connection: host waits on the port, the joiner types the host's address ----
+	online->addWidget(make_section(tr("DIRECT CONNECTION (IP)")));
 	m_host_button = make_action(tr("HOST  (PLAYER 1)"));
 	m_host_button->setToolTip(tr("Waits for the other player on UDP port %1.\nThe port must be forwarded in your router.").arg(port));
-	direct->addWidget(m_host_button);
-	QLabel* host_hint = new QLabel(tr("Tell the other player your public IP address. Forward UDP port %1 in your router.").arg(port),
-		direct_page);
-	host_hint->setObjectName(QStringLiteral("Hint"));
-	direct->addWidget(host_hint);
-	direct->addSpacing(6);
-
+	online->addWidget(m_host_button);
+	online->addWidget(make_hint(tr("Tell the other player your public IP address. Forward UDP port %1 in your router.").arg(port)));
 	QHBoxLayout* join_row = new QHBoxLayout();
-	m_host_address = new QLineEdit(direct_page);
+	m_host_address = new QLineEdit(online_page);
 	m_host_address->setPlaceholderText(tr("Host IP address, e.g. 203.0.113.5"));
 	m_host_address->setText(QString::fromStdString(Host::GetBaseStringSettingValue(SECTION, "HostAddress", "")));
 	join_row->addWidget(m_host_address, 1);
 	m_join_button = make_action(tr("JOIN  (PLAYER 2)"));
 	join_row->addWidget(m_join_button);
-	direct->addLayout(join_row);
-	direct->addStretch(1);
-	m_online_modes->addWidget(direct_page);
-
-	// Rooms: the list of open rooms of this Mawarunco version on the lobby server.
-	QWidget* rooms_page = new QWidget(m_online_modes);
-	QVBoxLayout* rooms = new QVBoxLayout(rooms_page);
-	rooms->setContentsMargins(0, 0, 0, 0);
-	rooms->setSpacing(8);
-	m_room_list = new QTreeWidget(rooms_page);
-	m_room_list->setHeaderLabels({tr("HOST"), tr("COUNTRY"), tr("DELAY"), tr("ROLLBACK"), tr("ACCESS"), tr("OPEN FOR")});
-	m_room_list->setRootIsDecorated(false);
-	m_room_list->setUniformRowHeights(true);
-	m_room_list->setAlternatingRowColors(true);
-	m_room_list->setSelectionMode(QAbstractItemView::SingleSelection);
-	m_room_list->setEditTriggers(QAbstractItemView::NoEditTriggers);
-	m_room_list->header()->setStretchLastSection(false);
-	m_room_list->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-	for (int column = 1; column < 6; column++)
-		m_room_list->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
-	m_room_list->setMinimumHeight(120);
-	rooms->addWidget(m_room_list, 1);
-	QHBoxLayout* rooms_status_row = new QHBoxLayout();
-	m_rooms_status = new QLabel(rooms_page);
-	m_rooms_status->setObjectName(QStringLiteral("Hint"));
-	m_rooms_status->setTextFormat(Qt::PlainText);
-	rooms_status_row->addWidget(m_rooms_status, 1);
-	QPushButton* rooms_refresh = new QPushButton(tr("Refresh"), rooms_page);
-	rooms_refresh->setObjectName(QStringLiteral("Tab"));
-	rooms_status_row->addWidget(rooms_refresh);
-	rooms->addLayout(rooms_status_row);
-	m_join_room_button = make_action(tr("JOIN ROOM  (PLAYER 2)"));
-	m_join_room_button->setEnabled(false);
-	rooms->addWidget(m_join_room_button);
-	rooms->addSpacing(4);
-	QHBoxLayout* create_row = new QHBoxLayout();
-	m_room_code = new QLineEdit(rooms_page);
-	m_room_code->setPlaceholderText(tr("Room code (optional, 4-16 letters/digits, for a private room)"));
-	m_room_code->setMaxLength(16);
-	m_room_code->setValidator(new QRegularExpressionValidator(QRegularExpression(QStringLiteral("[A-Za-z0-9]*")), m_room_code));
-	create_row->addWidget(m_room_code, 1);
-	m_create_room_button = make_action(tr("CREATE ROOM  (PLAYER 1)"));
-	create_row->addWidget(m_create_room_button);
-	rooms->addLayout(create_row);
-	QLabel* rooms_hint = new QLabel(tr("The room list shows your name, country and settings, never your IP address. The player "
-									   "who joins your room gets your IP address to connect to you, as with Direct. Hosting "
-									   "needs UDP port %1 forwarded in your router.")
-										.arg(port),
-		rooms_page);
-	rooms_hint->setObjectName(QStringLiteral("Hint"));
-	rooms_hint->setWordWrap(true);
-	rooms->addWidget(rooms_hint);
-	m_online_modes->addWidget(rooms_page);
+	online->addLayout(join_row);
+	online->addStretch(1);
 
 	m_lobby = new LobbyClient(this);
 	m_room_refresh = new QTimer(this);
@@ -494,19 +488,6 @@ RollbackLauncher::RollbackLauncher()
 	connect(m_join_room_button, &QPushButton::clicked, this, &RollbackLauncher::onJoinRoomClicked);
 	connect(m_create_room_button, &QPushButton::clicked, this, &RollbackLauncher::onCreateRoomClicked);
 	connect(m_room_code, &QLineEdit::returnPressed, this, &RollbackLauncher::onCreateRoomClicked);
-	auto select_tab = [this](bool rooms_tab) {
-		m_online_modes->setCurrentIndex(rooms_tab ? 1 : 0);
-		Host::SetBaseStringSettingValue(SECTION, "OnlineTab", rooms_tab ? "rooms" : "direct");
-		Host::CommitBaseSettingChanges();
-		updateRoomRefresh();
-		if (rooms_tab)
-			refreshRooms();
-	};
-	connect(tab_direct, &QPushButton::clicked, this, [select_tab]() { select_tab(false); });
-	connect(m_tab_rooms, &QPushButton::clicked, this, [select_tab]() { select_tab(true); });
-	const bool rooms_tab = Host::GetBaseStringSettingValue(SECTION, "OnlineTab", "direct") == "rooms";
-	(rooms_tab ? m_tab_rooms : tab_direct)->setChecked(true);
-	m_online_modes->setCurrentIndex(rooms_tab ? 1 : 0);
 
 	// ---- Page: training ----------------------------------------------------------------------------------
 	QVBoxLayout* training = nullptr;
@@ -665,7 +646,7 @@ RollbackLauncher::RollbackLauncher()
 	connect(mode_group, &QButtonGroup::buttonClicked, this, update_display_info);
 	update_display_info();
 
-	QPushButton* menu_online = add_menu_entry(tr("ONLINE"), online_page);
+	QPushButton* menu_online = add_menu_entry(tr("ONLINE"), online_scroll);
 	add_menu_entry(tr("TRAINING"), training_page);
 	add_menu_entry(tr("BUTTON CONFIG"), buttons_page);
 	add_menu_entry(tr("DISPLAY"), display_page);
@@ -1240,7 +1221,7 @@ void RollbackLauncher::closeEvent(QCloseEvent* event)
 
 void RollbackLauncher::updateRoomRefresh()
 {
-	const bool shown = isVisible() && m_pages->currentWidget() == m_online_page && m_online_modes->currentIndex() == 1;
+	const bool shown = isVisible() && m_pages->currentWidget() == m_online_page;
 	if (shown && !m_room_refresh->isActive())
 		m_room_refresh->start();
 	else if (!shown)
@@ -1284,10 +1265,13 @@ void RollbackLauncher::refreshRooms()
 			if (room.id == selected_id)
 				item->setSelected(true);
 		}
+		// Numbers only (no names), so rich text is safe here.
+		m_online_count->setText(QStringLiteral("<span style='color:#6fd08c'>&#9679;</span> ") +
+			((result.value->online == 1) ? tr("1 player online") : tr("%1 players online").arg(result.value->online)));
 		const int count = static_cast<int>(result.value->rooms.size());
-		QString text = (count == 0) ? tr("No open rooms. Create one, or wait for others.") : tr("%n open room(s).", nullptr, count);
+		QString text = (count == 0) ? tr("No open rooms. Create one, or wait for others.") : ((count == 1) ? tr("1 open room.") : tr("%1 open rooms.").arg(count));
 		if (result.value->playing > 0)
-			text += QLatin1Char(' ') + tr("%n match(es) running.", nullptr, result.value->playing);
+			text += QLatin1Char(' ') + ((result.value->playing == 1) ? tr("1 match running.") : tr("%1 matches running.").arg(result.value->playing));
 		m_rooms_status->setText(text);
 		m_join_room_button->setEnabled(!m_room_list->selectedItems().isEmpty() && m_create_room_button->isEnabled());
 	});
@@ -1372,8 +1356,21 @@ void RollbackLauncher::sendHeartbeat()
 		if (result.value->playing && !result.value->guest.isEmpty() && result.value->guest != m_room_guest)
 		{
 			m_room_guest = result.value->guest;
+			m_guest_wait.start();
 			Host::AddIconOSDMessage("LobbyGuest", ICON_FA_NETWORK_WIRED,
 				fmt::format("Lobby: {} is joining your room.", m_room_guest.toStdString()), Host::OSD_INFO_DURATION);
+		}
+		else if (result.value->playing && !m_room_guest.isEmpty() && !Netplay::IsConnected() &&
+				 m_guest_wait.isValid() && m_guest_wait.elapsed() > 40000)
+		{
+			// The joiner took the room but never connected (gave up, blocked, or just took it): list the
+			// room again, so the host is not stuck with a room nobody can join.
+			Host::AddIconOSDMessage("LobbyGuest", ICON_FA_NETWORK_WIRED,
+				fmt::format("Lobby: {} did not connect. Your room is open again.", m_room_guest.toStdString()),
+				Host::OSD_INFO_DURATION);
+			m_lobby->reopenRoom(m_room_id, m_room_token);
+			m_room_guest.clear();
+			m_guest_wait.invalidate();
 		}
 	});
 }
@@ -1387,6 +1384,7 @@ void RollbackLauncher::closeOwnRoom()
 	m_room_id.clear();
 	m_room_token.clear();
 	m_room_guest.clear();
+	m_guest_wait.invalidate();
 }
 
 void RollbackLauncher::onJoinRoomClicked()
@@ -1518,7 +1516,8 @@ bool RollbackLauncher::boot(const std::string& netplay_spec, const char* shortcu
 	g_emu_thread->applySettings();
 
 	Error error;
-	if (!netplay_spec.empty() && !Netplay::SetLaunchOptions(netplay_spec, &error))
+	const std::string spec = (!netplay_spec.empty() && m_show_ping->isChecked()) ? netplay_spec + ",ping" : netplay_spec;
+	if (!spec.empty() && !Netplay::SetLaunchOptions(spec, &error))
 	{
 		QMessageBox::critical(this, windowTitle(), QString::fromStdString(error.GetDescription()));
 		return false;

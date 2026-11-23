@@ -6,6 +6,7 @@
 #include "pcsx2/Input/InputManager.h"
 #include "pcsx2/Rollback/FucButtons.h"
 
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QPointer>
 #include <QtCore/QSize>
 #include <QtGui/QFont>
@@ -16,6 +17,7 @@
 #include <string>
 
 class QButtonGroup;
+class QCheckBox;
 class QComboBox;
 class QStackedWidget;
 class QLabel;
@@ -114,8 +116,8 @@ private:
 	QPushButton* m_practice_button = nullptr;
 	// Online page: direct IP or rooms.
 	QWidget* m_online_page = nullptr;
-	QStackedWidget* m_online_modes = nullptr;
-	QPushButton* m_tab_rooms = nullptr;
+	QLabel* m_online_count = nullptr; // players online, from the lobby
+	QCheckBox* m_show_ping = nullptr;
 	QTreeWidget* m_room_list = nullptr;
 	QLabel* m_rooms_status = nullptr;
 	QLineEdit* m_room_code = nullptr;
@@ -128,6 +130,7 @@ private:
 	QString m_room_id;    // room this player hosts, empty = none
 	QString m_room_token; // proves to the lobby that the room is ours
 	QString m_room_guest; // joiner announced by the lobby (shown once)
+	QElapsedTimer m_guest_wait; // since the joiner was announced; reopen the room if they never connect
 	// Button config page: one row per action (index = action, 0 unused) with the glyph of its button.
 	std::array<QPushButton*, FucButtons::NUM_ACTIONS> m_action_rows = {};
 	std::array<QLabel*, FucButtons::NUM_ACTIONS> m_action_glyphs = {};

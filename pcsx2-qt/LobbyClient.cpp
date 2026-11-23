@@ -191,6 +191,7 @@ void LobbyClient::listRooms(std::function<void(Result<RoomList>)> done)
 		}
 		RoomList list;
 		list.playing = IntIn(obj->value(QStringLiteral("playing")), 0, 100000).value_or(0);
+		list.online = IntIn(obj->value(QStringLiteral("online")), 0, 1000000).value_or(0);
 		for (const QJsonValue& v : obj->value(QStringLiteral("rooms")).toArray())
 		{
 			const QJsonObject r = v.toObject();
@@ -295,6 +296,12 @@ void LobbyClient::joinRoom(const QString& id, const std::string& name, const std
 		result.value = std::move(info);
 		done(std::move(result));
 	});
+}
+
+void LobbyClient::reopenRoom(const QString& id, const QString& token)
+{
+	post(fmt::format("action=reopen&id={}&token={}", id.toStdString(), token.toStdString()),
+		[](int, const QByteArray&, const QString&) {});
 }
 
 void LobbyClient::closeRoom(const QString& id, const QString& token)

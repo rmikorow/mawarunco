@@ -70,13 +70,15 @@ This repository is public so that anyone can check what the program does.
     depth) and then GGRS messages, which carry controller input (18 bytes
     per player and frame) and checksums.
   - Received input is only used as button and stick values. It never
-    becomes a memory address, file name or command.
+    becomes a memory address, file name or command. Packets are decoded
+    with a size limit; a host turns away connections from other versions
+    or other programs and keeps waiting.
   - Code: [`3rdparty/ggrs-capi/src/lib.rs`](3rdparty/ggrs-capi/src/lib.rs)
     (socket, handshake), [`pcsx2/Rollback/Netplay.cpp`](pcsx2/Rollback/Netplay.cpp)
     (session, input handshake for button config and names).
 - **Room list (lobby):**
-  - Used only while the *Rooms* tab is open or you host a room. HTTPS only,
-    certificates are checked.
+  - Used only while the online page is open or you host a room. HTTPS only,
+    certificates are checked; the server refuses plain HTTP.
   - The launcher sends: program version, your player name, the country you
     chose (optional), input delay, rollback depth, port and a room code if
     you set one. The lobby sees your IP address like any web server.

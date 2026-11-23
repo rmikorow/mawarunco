@@ -63,13 +63,17 @@ Run "Mawarunco.exe". The start window opens:
     same value. A higher value helps against rollback stutter on high ping.
     Country: shown next to your name in the room list (taken from your
     Windows region; "(not shown)" hides it).
-    Rooms tab: the list of open rooms. "CREATE ROOM" lists your room
-    (with a room code if you enter one: only players who know it can join)
-    and waits for a player. Pick a room and click "JOIN ROOM" to play.
-    Hosting a room still needs the port forwarding (1c).
-    Direct (IP) tab: the host clicks "HOST (PLAYER 1)" and tells the other
-    player their public IP address (e.g. from whatismyipaddress.com); the
-    other player enters it and clicks "JOIN (PLAYER 2)".
+    ROOMS (top of the page): the list of open rooms, with the number of
+    players online. "CREATE ROOM" lists your room (with a room code if you
+    enter one: only players who know it can join) and waits for a player.
+    Pick a room and click "JOIN ROOM" to play. Hosting a room still needs
+    the port forwarding (1c). If the player who took your room does not
+    connect within about 40 seconds, your room is listed again.
+    WHEN YOU HOST: delay and rollback (see below), and whether the game
+    shows the ping to the other player (top left, updated every 2 seconds).
+    DIRECT CONNECTION (IP): the host clicks "HOST (PLAYER 1)" and tells the
+    other player their public IP address (e.g. from whatismyipaddress.com);
+    the other player enters it and clicks "JOIN (PLAYER 2)".
 
 - TRAINING: practice on your own, offline.
 
@@ -116,7 +120,7 @@ To end a game: close the game window; the start window comes back.
 - Over the network only the other player's controller input arrives (which
   buttons are pressed), and only during a session.
 - The room list talks to the Mawarunco lobby over HTTPS, only while the
-  Rooms tab is open or you host a room. It sends your name, the country you
+  online page is open or you host a room. It sends your name, the country you
   chose, the room settings and the program version. The list never shows
   IP addresses; a host's address goes only to the player who joins.
 - Only accept the package from the organizer. A SHA-256 checksum

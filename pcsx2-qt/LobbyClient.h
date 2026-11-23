@@ -41,7 +41,8 @@ public:
 	struct RoomList
 	{
 		std::vector<Room> rooms;
-		int playing = 0;
+		int playing = 0; // matches running (this version)
+		int online = 0;  // players online (all versions), estimated by the lobby
 	};
 
 	struct CreatedRoom
@@ -86,6 +87,8 @@ public:
 	void heartbeat(const QString& id, const QString& token, std::function<void(Result<Heartbeat>)> done);
 	void joinRoom(const QString& id, const std::string& name, const std::string& code,
 		std::function<void(Result<JoinInfo>)> done);
+	/// The joiner never connected: lists the room again.
+	void reopenRoom(const QString& id, const QString& token);
 	void closeRoom(const QString& id, const QString& token);
 
 	/// Finishes outstanding requests (at most a few seconds), e.g. to close a room when the program exits.
