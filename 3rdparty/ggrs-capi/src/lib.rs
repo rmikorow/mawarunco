@@ -63,11 +63,15 @@ struct PeerSocket {
     peer: SharedAddr,
 }
 
+fn bind_udp(port: u16) -> std::io::Result<UdpSocket> {
+    let socket = UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))?;
+    socket.set_nonblocking(true)?;
+    Ok(socket)
+}
+
 impl PeerSocket {
-    fn bind(port: u16, placeholder: SocketAddr, peer: SharedAddr) -> std::io::Result<Self> {
-        let socket = UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))?;
-        socket.set_nonblocking(true)?;
-        Ok(Self { socket, buffer: Box::new([0; 4096]), placeholder, peer })
+    fn new(socket: UdpSocket, placeholder: SocketAddr, peer: SharedAddr) -> Self {
+        Self { socket, buffer: Box::new([0; 4096]), placeholder, peer }
     }
 }
 
@@ -84,6 +88,10 @@ impl NonBlockingSocket<SocketAddr> for PeerSocket {
         loop {
             match self.socket.recv_from(&mut self.buffer[..]) {
                 Ok((n, src)) => {
+                    // Late session handshake packets (see GgrsNet) are not GGRS messages.
+                    if self.buffer[..n].starts_with(HS_MAGIC) {
+                        continue;
+                    }
                     let Ok(msg) = bincode::deserialize::<Message>(&self.buffer[..n]) else { continue };
                     if self.peer.get().is_none() {
                         self.peer.set(Some(src));
@@ -267,32 +275,21 @@ pub extern "C" fn ggrs_last_error(buf: *mut c_char, buf_len: usize) -> usize {
     })
 }
 
-/// Starts a peer-to-peer session. Returns null on error (see ggrs_last_error).
-#[unsafe(no_mangle)]
-pub extern "C" fn ggrs_p2p_start(cfg: *const GgrsP2PConfig) -> *mut GgrsSession {
-    // SAFETY: the caller passes a valid config or null.
-    let Some(cfg) = (unsafe { cfg.as_ref() }) else {
-        set_error("null config");
-        return std::ptr::null_mut();
-    };
+fn parse_remote(cfg: &GgrsP2PConfig) -> Result<Option<SocketAddr>, String> {
     if cfg.remote_addr.is_null() {
-        set_error("null remote address");
-        return std::ptr::null_mut();
+        return Err("null remote address".into());
     }
     // SAFETY: NUL terminated string from the caller.
     let addr_str = unsafe { CStr::from_ptr(cfg.remote_addr) }.to_string_lossy();
     // "any": host side, the peer address is learned from its first packet.
-    let peer: Option<SocketAddr> = if addr_str.trim().eq_ignore_ascii_case("any") {
-        None
-    } else {
-        match addr_str.trim().parse() {
-            Ok(a) => Some(a),
-            Err(e) => {
-                set_error(format!("invalid remote address '{addr_str}': {e}"));
-                return std::ptr::null_mut();
-            }
-        }
-    };
+    if addr_str.trim().eq_ignore_ascii_case("any") {
+        return Ok(None);
+    }
+    addr_str.trim().parse().map(Some).map_err(|e| format!("invalid remote address '{addr_str}': {e}"))
+}
+
+/// Builds the P2P session on a bound socket. Returns null on error.
+fn start_p2p(cfg: &GgrsP2PConfig, socket: UdpSocket, peer: Option<SocketAddr>) -> *mut GgrsSession {
     // GGRS identifies the peer by this address; the socket maps it to the actual one.
     let remote = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 1)), 1);
     let peer_addr: SharedAddr = Rc::new(Cell::new(peer));
@@ -318,9 +315,7 @@ pub extern "C" fn ggrs_p2p_start(cfg: *const GgrsP2PConfig) -> *mut GgrsSession 
                 if player == cfg.local_player as usize { PlayerType::Local } else { PlayerType::Remote(remote) };
             builder = builder.add_player(kind, player).map_err(|e| e.to_string())?;
         }
-        let socket = PeerSocket::bind(cfg.local_port, remote, peer_addr.clone())
-            .map_err(|e| format!("cannot bind UDP port {}: {e}", cfg.local_port))?;
-        builder.start_p2p_session(socket).map_err(|e| e.to_string())
+        builder.start_p2p_session(PeerSocket::new(socket, remote, peer_addr.clone())).map_err(|e| e.to_string())
     };
 
     match build() {
@@ -334,6 +329,233 @@ pub extern "C" fn ggrs_p2p_start(cfg: *const GgrsP2PConfig) -> *mut GgrsSession 
             set_error(e);
             std::ptr::null_mut()
         }
+    }
+}
+
+/// Starts a peer-to-peer session. Returns null on error (see ggrs_last_error).
+#[unsafe(no_mangle)]
+pub extern "C" fn ggrs_p2p_start(cfg: *const GgrsP2PConfig) -> *mut GgrsSession {
+    // SAFETY: the caller passes a valid config or null.
+    let Some(cfg) = (unsafe { cfg.as_ref() }) else {
+        set_error("null config");
+        return std::ptr::null_mut();
+    };
+    let peer = match parse_remote(cfg) {
+        Ok(p) => p,
+        Err(e) => {
+            set_error(e);
+            return std::ptr::null_mut();
+        }
+    };
+    match bind_udp(cfg.local_port) {
+        Ok(socket) => start_p2p(cfg, socket, peer),
+        Err(e) => {
+            set_error(format!("cannot bind UDP port {}: {e}", cfg.local_port));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Session handshake before GGRS starts (room settings, versions)
+// ---------------------------------------------------------------------------------------------------
+
+/// Marks handshake packets; they are never valid GGRS messages for the peer socket.
+const HS_MAGIC: &[u8; 4] = b"FUCH";
+const HS_HELLO: u8 = 1; // joiner -> host, payload: joiner info
+const HS_WELCOME: u8 = 2; // host -> joiner, payload: host info (room settings)
+const HS_READY: u8 = 3; // joiner -> host: got the settings, GGRS starts
+const HS_MAX_PAYLOAD: usize = 512;
+
+/// A UDP socket that exchanges one payload with the peer before the GGRS session starts on it.
+///
+/// The joining side sends HELLO with its payload until the host answers with WELCOME and its payload,
+/// then confirms with READY and starts GGRS. The host learns the joiner's address from its first HELLO
+/// (later packets from other addresses are ignored) and answers every HELLO; it is done on READY, or when
+/// GGRS packets from the joiner arrive (the joiner has moved on, READY was lost).
+pub struct GgrsNet {
+    socket: Option<UdpSocket>,
+    peer: Option<SocketAddr>,
+    is_host: bool,
+    remote_payload: Option<Vec<u8>>,
+    done: bool,
+    last_hello: Option<std::time::Instant>,
+}
+
+fn hs_packet(kind: u8, payload: &[u8]) -> Vec<u8> {
+    let mut p = Vec::with_capacity(5 + payload.len());
+    p.extend_from_slice(HS_MAGIC);
+    p.push(kind);
+    p.extend_from_slice(payload);
+    p
+}
+
+/// Opens the socket for a session handshake. `remote_addr` is "ip:port" (join) or "any" (host).
+/// Returns null on error.
+#[unsafe(no_mangle)]
+pub extern "C" fn ggrs_net_open(local_port: u16, remote_addr: *const c_char) -> *mut GgrsNet {
+    if remote_addr.is_null() {
+        set_error("null remote address");
+        return std::ptr::null_mut();
+    }
+    // SAFETY: NUL terminated string from the caller.
+    let addr_str = unsafe { CStr::from_ptr(remote_addr) }.to_string_lossy();
+    let peer = if addr_str.trim().eq_ignore_ascii_case("any") {
+        None
+    } else {
+        match addr_str.trim().parse::<SocketAddr>() {
+            Ok(a) => Some(a),
+            Err(e) => {
+                set_error(format!("invalid remote address '{addr_str}': {e}"));
+                return std::ptr::null_mut();
+            }
+        }
+    };
+    match bind_udp(local_port) {
+        Ok(socket) => Box::into_raw(Box::new(GgrsNet {
+            socket: Some(socket),
+            peer,
+            is_host: peer.is_none(),
+            remote_payload: None,
+            done: false,
+            last_hello: None,
+        })),
+        Err(e) => {
+            set_error(format!("cannot bind UDP port {local_port}: {e}"));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Runs the handshake; call it regularly. `local` is this side's payload (at most 512 bytes). Returns 0
+/// while waiting, the length of the peer's payload (copied to `out`, truncated to `out_len`) when done, or
+/// a negative value on error.
+#[unsafe(no_mangle)]
+pub extern "C" fn ggrs_net_poll(
+    net: *mut GgrsNet,
+    local: *const u8,
+    local_len: usize,
+    out: *mut u8,
+    out_len: usize,
+) -> i32 {
+    // SAFETY: pointer from ggrs_net_open, not freed yet.
+    let Some(net) = (unsafe { net.as_mut() }) else { return GGRS_ERR_OTHER };
+    if local.is_null() || local_len > HS_MAX_PAYLOAD {
+        set_error("invalid handshake payload");
+        return GGRS_ERR_OTHER;
+    }
+    // SAFETY: the caller provides local_len bytes.
+    let local = unsafe { std::slice::from_raw_parts(local, local_len) };
+    let Some(socket) = net.socket.as_ref() else {
+        set_error("socket already handed to the session");
+        return GGRS_ERR_OTHER;
+    };
+
+    let mut buf = [0u8; 4096];
+    if !net.done {
+        loop {
+            let (n, src) = match socket.recv_from(&mut buf) {
+                Ok(r) => r,
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
+                Err(ref e) if e.kind() == ErrorKind::ConnectionReset => continue,
+                Err(e) => {
+                    set_error(format!("network error: {e}"));
+                    return GGRS_ERR_OTHER;
+                }
+            };
+            let packet = &buf[..n];
+            let is_hs = packet.len() >= 5 && packet.starts_with(HS_MAGIC);
+            if net.is_host {
+                if is_hs && packet[4] == HS_HELLO && net.peer.is_none_or(|p| p == src) {
+                    net.peer = Some(src);
+                    net.remote_payload = Some(packet[5..].to_vec());
+                    let _ = socket.send_to(&hs_packet(HS_WELCOME, local), src);
+                } else if Some(src) == net.peer && net.remote_payload.is_some() && (!is_hs || packet[4] == HS_READY) {
+                    // READY, or the joiner's GGRS already runs (READY lost).
+                    net.done = true;
+                    break;
+                }
+            } else if is_hs && packet[4] == HS_WELCOME && Some(src) == net.peer {
+                net.remote_payload = Some(packet[5..].to_vec());
+                net.done = true;
+                // Several times: losing READY only delays the host until GGRS packets arrive.
+                for _ in 0..3 {
+                    let _ = socket.send_to(&hs_packet(HS_READY, &[]), src);
+                }
+                break;
+            }
+        }
+    }
+
+    // The joiner says hello every 100 ms until the host answers.
+    if !net.is_host && !net.done {
+        let now = std::time::Instant::now();
+        if net.last_hello.is_none_or(|t| now.duration_since(t).as_millis() >= 100) {
+            net.last_hello = Some(now);
+            if let Some(peer) = net.peer {
+                let _ = socket.send_to(&hs_packet(HS_HELLO, local), peer);
+            }
+        }
+    }
+
+    if !net.done {
+        return 0;
+    }
+    let payload = net.remote_payload.as_deref().unwrap_or(&[]);
+    if !out.is_null() && out_len > 0 {
+        let n = payload.len().min(out_len);
+        // SAFETY: the caller provides out_len bytes.
+        unsafe { std::ptr::copy_nonoverlapping(payload.as_ptr(), out, n) };
+    }
+    // At least 1, so "done" is never confused with "waiting" (payloads are never empty in practice).
+    payload.len().max(1) as i32
+}
+
+/// Remote address learned by the handshake as "ip:port" (NUL terminated, truncated). Returns the full
+/// length, 0 while unknown.
+#[unsafe(no_mangle)]
+pub extern "C" fn ggrs_net_peer_address(net: *mut GgrsNet, buf: *mut c_char, buf_len: usize) -> usize {
+    // SAFETY: pointer from ggrs_net_open, not freed yet.
+    let Some(net) = (unsafe { net.as_mut() }) else { return 0 };
+    let Some(addr) = net.peer else { return 0 };
+    let text = addr.to_string();
+    if !buf.is_null() && buf_len > 0 {
+        let n = text.len().min(buf_len - 1);
+        // SAFETY: the caller provides a buffer of buf_len bytes.
+        unsafe {
+            std::ptr::copy_nonoverlapping(text.as_ptr(), buf as *mut u8, n);
+            *buf.add(n) = 0;
+        }
+    }
+    text.len()
+}
+
+/// Starts the P2P session on the handshake's socket, with the peer address it learned. `cfg.local_port`
+/// and `cfg.remote_addr` are ignored. The handle stays valid for ggrs_net_free. Returns null on error.
+#[unsafe(no_mangle)]
+pub extern "C" fn ggrs_p2p_start_net(net: *mut GgrsNet, cfg: *const GgrsP2PConfig) -> *mut GgrsSession {
+    // SAFETY: pointers from the caller (ggrs_net_open / a valid config).
+    let (Some(net), Some(cfg)) = (unsafe { net.as_mut() }, unsafe { cfg.as_ref() }) else {
+        set_error("null handshake or config");
+        return std::ptr::null_mut();
+    };
+    if !net.done || net.peer.is_none() {
+        set_error("handshake not finished");
+        return std::ptr::null_mut();
+    }
+    let Some(socket) = net.socket.take() else {
+        set_error("socket already handed to a session");
+        return std::ptr::null_mut();
+    };
+    start_p2p(cfg, socket, net.peer)
+}
+
+/// Frees a handshake handle (and its socket, unless a session took it).
+#[unsafe(no_mangle)]
+pub extern "C" fn ggrs_net_free(net: *mut GgrsNet) {
+    if !net.is_null() {
+        // SAFETY: pointer from Box::into_raw, freed once.
+        drop(unsafe { Box::from_raw(net) });
     }
 }
 

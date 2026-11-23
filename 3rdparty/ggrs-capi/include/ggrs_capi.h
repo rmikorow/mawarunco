@@ -74,6 +74,17 @@ GgrsSession* ggrs_p2p_start(const GgrsP2PConfig* cfg);
 GgrsSession* ggrs_synctest_start(uint32_t num_players, uint32_t check_distance, uint32_t input_delay, uint32_t max_prediction);
 void ggrs_free(GgrsSession* s);
 
+/* Session handshake before GGRS starts: exchanges one payload (at most 512 bytes) with the peer on the
+ * socket the session will use. remote_addr: "ip:port" (join) or "any" (host, learns the joiner's address).
+ * ggrs_net_poll returns 0 while waiting, the peer's payload length when done (copied to out), < 0 on error.
+ * ggrs_p2p_start_net then starts the session on that socket (cfg->local_port and remote_addr are ignored). */
+typedef struct GgrsNet GgrsNet;
+GgrsNet* ggrs_net_open(uint16_t local_port, const char* remote_addr);
+int32_t ggrs_net_poll(GgrsNet* net, const uint8_t* local, size_t local_len, uint8_t* out, size_t out_len);
+size_t ggrs_net_peer_address(GgrsNet* net, char* buf, size_t buf_len);
+GgrsSession* ggrs_p2p_start_net(GgrsNet* net, const GgrsP2PConfig* cfg);
+void ggrs_net_free(GgrsNet* net);
+
 void ggrs_poll(GgrsSession* s);
 bool ggrs_is_running(GgrsSession* s);
 int32_t ggrs_add_local_input(GgrsSession* s, uint32_t player, const uint8_t* input);

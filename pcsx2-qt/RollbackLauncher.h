@@ -66,6 +66,7 @@ private:
 	/// Saves the chosen delay and address, sets the BIOS and both controller ports, boots the game.
 	void boot(const std::string& netplay_spec, const char* shortcut);
 	int selectedDelay() const;
+	int selectedRollback() const;
 	/// Takes over the BIOS and disc image chosen in the installer (inis\launcher-setup.txt).
 	void importInstallerChoices();
 	/// Shows the local in-game button layout in the action rows.
@@ -84,6 +85,7 @@ private:
 	QLabel* m_game_status = nullptr;
 	QStackedWidget* m_pages = nullptr;
 	QButtonGroup* m_delay_group = nullptr; // id = delay in frames
+	QButtonGroup* m_rollback_group = nullptr; // id = rollback depth in frames
 	QLineEdit* m_host_address = nullptr;
 	QLineEdit* m_player_name = nullptr;
 	// Display page.

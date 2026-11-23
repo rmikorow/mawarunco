@@ -8,6 +8,7 @@
 #include "Rollback/Rollback.h"
 #include "Rollback/RunAhead.h"
 
+#include "BuildVersion.h"
 #include "Config.h"
 #include "Host.h"
 #include "IconsFontAwesome.h"
@@ -69,6 +70,16 @@ namespace Netplay
 	static std::optional<Options> s_pending; // set by SetLaunchOptions, started at the first exit
 	static Options s_options;
 	static GgrsSession* s_session = nullptr;
+	// Room handshake before the GGRS session (direct IP): the host sends its room settings (input delay,
+	// rollback depth) and both sides compare program versions. The session starts once it is done.
+	static GgrsNet* s_net = nullptr;
+	static constexpr u32 MAX_DELAY = 8;
+	static constexpr u32 MAX_ROLLBACK = 8;
+	static std::string RoomPayload();
+	static bool ApplyRoomPayload(std::string_view remote, Error* error);
+	static void PollRoomHandshake();
+	static bool StartSession(Error* error);
+	static void ShowWaiting();
 	static std::vector<std::unique_ptr<Rollback::Snapshot>> s_ring; // not movable, so held by pointer
 
 	static bool s_exit_pending = false;
@@ -339,7 +350,7 @@ bool Netplay::SetLaunchOptions(std::string_view spec, Error* error)
 
 bool Netplay::IsActive()
 {
-	return s_session || s_pending.has_value();
+	return s_session || s_net || s_pending.has_value();
 }
 
 bool Netplay::Start(const Options& opts, Error* error)
@@ -356,20 +367,11 @@ bool Netplay::Start(const Options& opts, Error* error)
 	}
 	else
 	{
-		GgrsP2PConfig cfg = {};
-		cfg.num_players = NUM_PLAYERS;
-		cfg.local_player = opts.local_player;
-		cfg.local_port = opts.local_port;
-		cfg.remote_addr = opts.remote.c_str();
-		cfg.input_delay = opts.input_delay;
-		cfg.max_prediction = opts.max_prediction;
-		cfg.desync_interval = opts.desync_interval;
-		cfg.sparse_saving = opts.sparse_saving;
-		cfg.fps = 60;
-		s_session = ggrs_p2p_start(&cfg);
+		// GGRS starts after the room handshake (PollRoomHandshake).
+		s_net = ggrs_net_open(opts.local_port, opts.remote.c_str());
 	}
 
-	if (!s_session)
+	if (!s_session && !s_net)
 	{
 		Rollback::EndInputInjection();
 		Error::SetString(error, fmt::format("GGRS: {}", LastGgrsError()));
@@ -377,11 +379,14 @@ bool Netplay::Start(const Options& opts, Error* error)
 	}
 
 	s_options = opts;
-	// One slot per frame that can be rolled back to, plus the current frame and a margin.
-	const u32 depth = opts.synctest ? std::max(opts.max_prediction, opts.check_distance + 1) : opts.max_prediction;
-	s_ring.clear();
-	for (u32 i = 0; i < depth + 3; i++)
-		s_ring.push_back(std::make_unique<Rollback::Snapshot>());
+	if (opts.synctest)
+	{
+		// One slot per frame that can be rolled back to, plus the current frame and a margin.
+		const u32 depth = std::max(opts.max_prediction, opts.check_distance + 1);
+		s_ring.clear();
+		for (u32 i = 0; i < depth + 3; i++)
+			s_ring.push_back(std::make_unique<Rollback::Snapshot>());
+	}
 	s_need_advance = true;
 	s_req_count = s_req_index = 0;
 	s_was_running = false;
@@ -403,10 +408,8 @@ bool Netplay::Start(const Options& opts, Error* error)
 	}
 	else
 	{
-		Console.WriteLn(fmt::format("Netplay: session started, local player {} on UDP port {}, remote {}, delay {}, "
-									"rollback {}, desync check every {} frames{}",
-			opts.local_player + 1, opts.local_port, opts.remote, opts.input_delay, opts.max_prediction,
-			opts.desync_interval, opts.sparse_saving ? ", sparse saving" : ""));
+		Console.WriteLn(fmt::format("Netplay: waiting for the room handshake, local player {} on UDP port {}, remote {}",
+			opts.local_player + 1, opts.local_port, opts.remote));
 		Host::AddIconOSDMessage(OSD_KEY, ICON_FA_NETWORK_WIRED,
 			(opts.remote == "any") ? fmt::format("Netplay: hosting on UDP port {}, waiting for the other player ...", opts.local_port) :
 									 fmt::format("Netplay: connecting to {} ...", opts.remote),
@@ -418,6 +421,17 @@ bool Netplay::Start(const Options& opts, Error* error)
 void Netplay::Stop()
 {
 	// A session that has not started yet stays pending (the boot state load also calls this).
+	if (s_net)
+	{
+		ggrs_net_free(s_net);
+		s_net = nullptr;
+		if (!s_session)
+		{
+			Rollback::EndInputInjection();
+			Console.WriteLn("Netplay: stopped before the session started");
+			return;
+		}
+	}
 	if (!s_session)
 		return;
 
@@ -450,6 +464,132 @@ void Netplay::LogStats()
 								"time sync {:.0f} ms{}",
 		s_stats.real_frames, s_stats.rollbacks, s_stats.resimulated, s_stats.max_rollback, s_stats.waits,
 		s_stats.timesync_ms, net));
+}
+
+std::string Netplay::RoomPayload()
+{
+	// Text, so it can grow (lobby, more settings) without breaking older peers' parsing.
+	return fmt::format("FUC1;ver={};delay={};rollback={}", BuildVersion::GitHash, s_options.input_delay,
+		s_options.max_prediction);
+}
+
+bool Netplay::ApplyRoomPayload(std::string_view remote, Error* error)
+{
+	std::string version;
+	std::optional<u32> delay, rollback;
+	for (const std::string_view part : StringUtil::SplitString(remote, ';', true))
+	{
+		const size_t eq = part.find('=');
+		if (eq == std::string_view::npos)
+			continue;
+		const std::string_view key = part.substr(0, eq);
+		const std::string_view value = part.substr(eq + 1);
+		if (key == "ver")
+			version = value;
+		else if (key == "delay")
+			delay = StringUtil::FromChars<u32>(value);
+		else if (key == "rollback")
+			rollback = StringUtil::FromChars<u32>(value);
+	}
+	if (!remote.starts_with("FUC1;"))
+	{
+		Error::SetString(error, "the other side is not a compatible netplay build");
+		return false;
+	}
+	if (version != BuildVersion::GitHash)
+	{
+		Error::SetString(error, fmt::format("the other player uses another program version ({} / yours {}). Both need the "
+											"same version.", version.substr(0, 9), std::string_view(BuildVersion::GitHash).substr(0, 9)));
+		return false;
+	}
+	// The host decides the room settings.
+	if (s_options.local_player != 0)
+	{
+		if (!delay || !rollback || *delay > MAX_DELAY || *rollback < 1 || *rollback > MAX_ROLLBACK)
+		{
+			Error::SetString(error, "invalid room settings from the host");
+			return false;
+		}
+		s_options.input_delay = *delay;
+		s_options.max_prediction = *rollback;
+	}
+	return true;
+}
+
+void Netplay::ShowWaiting()
+{
+	// The game does not run until both peers are connected; keep saying so, otherwise the frozen screen
+	// looks like a hang.
+	const u32 seconds = static_cast<u32>(s_wait_timer.GetTimeSeconds());
+	if (seconds != s_wait_shown_seconds)
+	{
+		s_wait_shown_seconds = seconds;
+		Host::AddIconOSDMessage(OSD_KEY, ICON_FA_NETWORK_WIRED,
+			(s_options.remote == "any") ?
+				fmt::format("Netplay: waiting for player 2 (UDP port {}) ... {} s", s_options.local_port, seconds) :
+				fmt::format("Netplay: connecting to {} ... {} s", s_options.remote, seconds),
+			2.0f);
+	}
+}
+
+void Netplay::PollRoomHandshake()
+{
+	const std::string local = RoomPayload();
+	std::array<u8, 512> remote;
+	const s32 n = ggrs_net_poll(s_net, reinterpret_cast<const u8*>(local.data()), local.size(), remote.data(), remote.size());
+	if (n < 0)
+	{
+		Fail(fmt::format("connection failed: {}", LastGgrsError()));
+		return;
+	}
+	if (n == 0)
+	{
+		ShowWaiting();
+		return;
+	}
+
+	Error error;
+	const std::string_view remote_text(reinterpret_cast<const char*>(remote.data()), std::min<size_t>(n, remote.size()));
+	if (!ApplyRoomPayload(remote_text, &error) || !StartSession(&error))
+	{
+		Fail(error.GetDescription());
+		return;
+	}
+}
+
+bool Netplay::StartSession(Error* error)
+{
+	GgrsP2PConfig cfg = {};
+	cfg.num_players = NUM_PLAYERS;
+	cfg.local_player = s_options.local_player;
+	cfg.local_port = s_options.local_port;
+	cfg.remote_addr = s_options.remote.c_str();
+	cfg.input_delay = s_options.input_delay;
+	cfg.max_prediction = s_options.max_prediction;
+	cfg.desync_interval = s_options.desync_interval;
+	cfg.sparse_saving = s_options.sparse_saving;
+	cfg.fps = 60;
+	s_session = ggrs_p2p_start_net(s_net, &cfg);
+	char peer[64] = {};
+	ggrs_net_peer_address(s_net, peer, sizeof(peer));
+	ggrs_net_free(s_net);
+	s_net = nullptr;
+	if (!s_session)
+	{
+		Error::SetString(error, fmt::format("GGRS: {}", LastGgrsError()));
+		return false;
+	}
+
+	// One slot per frame that can be rolled back to, plus the current frame and a margin.
+	s_ring.clear();
+	for (u32 i = 0; i < s_options.max_prediction + 3; i++)
+		s_ring.push_back(std::make_unique<Rollback::Snapshot>());
+	Console.WriteLn(fmt::format("Netplay: session started, local player {}, peer {}, delay {}, rollback {}{}, "
+								"desync check every {} frames{}",
+		s_options.local_player + 1, peer, s_options.input_delay, s_options.max_prediction,
+		(s_options.local_player != 0) ? " (room settings from the host)" : "", s_options.desync_interval,
+		s_options.sparse_saving ? ", sparse saving" : ""));
+	return true;
 }
 
 void Netplay::Fail(std::string_view what)
@@ -510,6 +650,13 @@ void Netplay::OnExecutionExited()
 
 bool Netplay::BeforeExecute()
 {
+	if (s_net && !s_session)
+	{
+		// Room handshake: the CPU does not run yet.
+		PollRoomHandshake();
+		Threading::Sleep(1);
+		return false;
+	}
 	if (!s_session || !s_need_advance)
 		return true;
 
@@ -532,18 +679,7 @@ bool Netplay::AdvanceSession()
 
 	if (!ggrs_is_running(s_session))
 	{
-		// The game does not run until both peers are connected; keep saying so, otherwise the frozen
-		// screen looks like a hang.
-		const u32 seconds = static_cast<u32>(s_wait_timer.GetTimeSeconds());
-		if (seconds != s_wait_shown_seconds)
-		{
-			s_wait_shown_seconds = seconds;
-			Host::AddIconOSDMessage(OSD_KEY, ICON_FA_NETWORK_WIRED,
-				(s_options.remote == "any") ?
-					fmt::format("Netplay: waiting for player 2 (UDP port {}) ... {} s", s_options.local_port, seconds) :
-					fmt::format("Netplay: connecting to {} ... {} s", s_options.remote, seconds),
-				2.0f);
-		}
+		ShowWaiting();
 		return false;
 	}
 

@@ -53,6 +53,12 @@ Run "pcsx2-qtx64-clang.exe". The start window opens:
     Name: your player name (up to 20 characters), shown above your health
     bar in the character select and the fight together with your wins,
     e.g. "MAWARU / 2WINS". Long names are drawn narrower.
+    Delay and Rollback are decided by the HOST for both players; when you
+    join, the host's values are used. Both players need the same program
+    version, otherwise a message says so when connecting.
+    Rollback: how many frames the game may predict before it waits for
+    the other player (2 is fine for normal ping; more helps on high ping
+    but needs a faster PC).
     Delay: input delay, 1 frame recommended. Both players should pick the
     same value. A higher value helps against rollback stutter on high ping.
     Host: click "HOST (PLAYER 1)" and tell the other player your public IP

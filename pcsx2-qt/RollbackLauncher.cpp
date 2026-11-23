@@ -63,6 +63,7 @@ static constexpr int DEFAULT_PORT = 7000;
 static constexpr int DEFAULT_DELAY = 1;
 static constexpr int DEFAULT_ROLLBACK = 2;
 static constexpr int MAX_DELAY = 3;
+static constexpr int MAX_ROLLBACK = 8;
 static constexpr s64 BIOS_SIZE = 4 * 1024 * 1024;
 
 // Common 4:3 resolutions for the display page (the game is 4:3).
@@ -300,11 +301,40 @@ RollbackLauncher::RollbackLauncher()
 		m_delay_group->addButton(b, i);
 		delay_row->addWidget(b);
 	}
-	QLabel* delay_hint = new QLabel(tr("   frames  -  1 recommended, both the same"), online_page);
+	QLabel* delay_hint = new QLabel(tr("   frames  -  1 recommended"), online_page);
 	delay_hint->setObjectName(QStringLiteral("Hint"));
 	delay_row->addWidget(delay_hint);
 	delay_row->addStretch(1);
 	online->addLayout(delay_row);
+
+	// Rollback depth: how many frames the game may predict before it waits for the other player.
+	QHBoxLayout* rollback_row = new QHBoxLayout();
+	rollback_row->setSpacing(0);
+	QLabel* rollback_label = new QLabel(tr("Rollback"), online_page);
+	rollback_label->setMinimumWidth(70);
+	rollback_row->addWidget(rollback_label);
+	m_rollback_group = new QButtonGroup(this);
+	const int saved_rollback = std::clamp(Host::GetBaseIntSettingValue(SECTION, "Rollback", DEFAULT_ROLLBACK), 1, MAX_ROLLBACK);
+	for (int i = 1; i <= MAX_ROLLBACK; i++)
+	{
+		QPushButton* b = new QPushButton(QString::number(i), online_page);
+		b->setObjectName(QStringLiteral("Delay"));
+		b->setCheckable(true);
+		b->setChecked(i == saved_rollback);
+		b->setMinimumWidth(34);
+		m_rollback_group->addButton(b, i);
+		rollback_row->addWidget(b);
+	}
+	QLabel* rollback_hint = new QLabel(tr("   frames  -  more helps on high ping, needs a faster PC"), online_page);
+	rollback_hint->setObjectName(QStringLiteral("Hint"));
+	rollback_row->addWidget(rollback_hint);
+	rollback_row->addStretch(1);
+	online->addLayout(rollback_row);
+	QLabel* room_hint = new QLabel(tr("The host decides delay and rollback for both players; when you join, the host's "
+									  "values are used."),
+		online_page);
+	room_hint->setObjectName(QStringLiteral("Hint"));
+	online->addWidget(room_hint);
 	online->addSpacing(6);
 
 	const int port = Host::GetBaseIntSettingValue(SECTION, "Port", DEFAULT_PORT);
@@ -833,6 +863,12 @@ void RollbackLauncher::applyWindowSize()
 	emit g_emu_thread->onResizeRenderWindowRequested(w, h);
 }
 
+int RollbackLauncher::selectedRollback() const
+{
+	const int id = m_rollback_group->checkedId();
+	return (id >= 1) ? id : DEFAULT_ROLLBACK;
+}
+
 int RollbackLauncher::selectedDelay() const
 {
 	const int id = m_delay_group->checkedId();
@@ -1035,8 +1071,7 @@ void RollbackLauncher::closeEvent(QCloseEvent* event)
 void RollbackLauncher::onHostClicked()
 {
 	const int port = Host::GetBaseIntSettingValue(SECTION, "Port", DEFAULT_PORT);
-	boot(fmt::format("host={},delay={},rollback={},boot", port, selectedDelay(),
-			 Host::GetBaseIntSettingValue(SECTION, "Rollback", DEFAULT_ROLLBACK)),
+	boot(fmt::format("host={},delay={},rollback={},boot", port, selectedDelay(), selectedRollback()),
 		nullptr);
 }
 
@@ -1056,8 +1091,7 @@ void RollbackLauncher::onJoinClicked()
 	if (!has_port)
 		address += fmt::format(":{}", Host::GetBaseIntSettingValue(SECTION, "Port", DEFAULT_PORT));
 
-	boot(fmt::format("join={},delay={},rollback={},boot", address, selectedDelay(),
-			 Host::GetBaseIntSettingValue(SECTION, "Rollback", DEFAULT_ROLLBACK)),
+	boot(fmt::format("join={},delay={},rollback={},boot", address, selectedDelay(), selectedRollback()),
 		nullptr);
 }
 
@@ -1083,6 +1117,7 @@ void RollbackLauncher::boot(const std::string& netplay_spec, const char* shortcu
 
 	// Remembered for the next start.
 	Host::SetBaseIntSettingValue(SECTION, "Delay", selectedDelay());
+	Host::SetBaseIntSettingValue(SECTION, "Rollback", selectedRollback());
 	Host::SetBaseStringSettingValue(SECTION, "HostAddress", m_host_address->text().trimmed().toUtf8().constData());
 	const std::string name = FucNames::Sanitize(m_player_name->text().toStdString());
 	Host::SetBaseStringSettingValue(SECTION, "PlayerName", name.c_str());
