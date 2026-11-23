@@ -152,7 +152,8 @@
     <h2>Features</h2>
     <h3 class="big">Built for online matches</h3>
     <div class="grid">
-      <div class="card"><h4>Rollback netplay</h4><p>Direct IP, no VPN. The host forwards one UDP port; joining needs nothing. The host sets input delay and rollback depth for the room.</p></div>
+      <div class="card"><h4>Rollback netplay</h4><p>Direct connection, no VPN. The host forwards one UDP port; joining needs nothing. The host sets input delay and rollback depth for the room.</p></div>
+      <div class="card"><h4>Rooms</h4><p>Open a room, with a code if you like, or join one from the list with a click. No IP addresses to type, and the list never shows them.</p></div>
       <div class="card"><h4>Low input latency</h4><p>Input-to-screen latency went from <span class="num">33.6 ms</span> to <span class="num">10.6 ms</span>. Run-ahead hides the game's internal lag, offline and online.</p></div>
       <div class="card"><h4>Straight to character select</h4><p>No savestates to share. The game boots straight to <em>Vs. 2P</em> or <em>Practice</em>, with all characters unlocked.</p></div>
       <div class="card"><h4>Your buttons, always</h4><p>Set the game's button config once in the start window. You keep your layout as player 1 or player 2.</p></div>
@@ -169,7 +170,7 @@
     <ol class="steps">
       <li><strong>Install</strong><span>Download <code>Mawarunco-Setup</code> from the latest release and run it. Choose your PS2 BIOS file and your disc image of Fate/unlimited codes.</span></li>
       <li><strong>Set up</strong><span>Start Mawarunco. Under <em>Button config</em>, set up your controller and buttons. Under <em>Online</em>, enter your name.</span></li>
-      <li><strong>Host or join</strong><span>The host forwards UDP port <code>7000</code> in their router, clicks <em>HOST</em> and shares their public IP address. The other player enters that address and clicks <em>JOIN</em>.</span></li>
+      <li><strong>Host or join</strong><span>Under <em>Rooms</em>, create a room or join one from the list. Or connect directly: the host clicks <em>HOST</em> and shares their public IP address, the other player enters it and clicks <em>JOIN</em>. The host forwards UDP port <code>7000</code> in their router.</span></li>
       <li><strong>Fight</strong><span>Both games boot to character select. Both players need the same Mawarunco version and the same BIOS version.</span></li>
     </ol>
   </div>
@@ -180,7 +181,8 @@
     <h2>Security and transparency</h2>
     <h3 class="big">Open source, so you can check it</h3>
     <ul class="checks">
-      <li><strong>Netplay is the only network code added.</strong> It opens one UDP port during an online session. It sends a short handshake and then controller input and checksums. Received input is only used as button values.</li>
+      <li><strong>Netplay sends only controller input.</strong> It opens one UDP port during an online session, for a short handshake and then controller input and checksums. Received input is only used as button values.</li>
+      <li><strong>The room list never shows IP addresses.</strong> It talks to the lobby over HTTPS only while you look at rooms or host one. A host's address goes only to the one player who joins, and is deleted when the room closes.</li>
       <li><strong>Nothing is downloaded or started.</strong> No other programs, no registry changes, no autostart. The PCSX2 auto updater is turned off.</li>
       <li><strong>No game files included.</strong> No BIOS, disc image or game data are in the repository or the downloads.</li>
       <li><strong>Releases you can verify.</strong> Every release is built from a tagged commit, with SHA-256 checksums for every file.</li>
