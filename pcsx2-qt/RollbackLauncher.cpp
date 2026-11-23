@@ -24,6 +24,7 @@
 
 #include "fmt/format.h"
 
+#include <QtCore/QPropertyAnimation>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QTimer>
 #include <QtGui/QCloseEvent>
@@ -36,6 +37,7 @@
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QStackedWidget>
+#include <QtWidgets/QGraphicsOpacityEffect>
 #include <QtWidgets/QGridLayout>
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QHBoxLayout>
@@ -450,7 +452,11 @@ void RollbackLauncher::startListening(u32 action)
 
 	// Already listening: only move the selection (the hook and held buttons stay).
 	if (m_listening_action >= 0)
+	{
+		m_right_hold_timer->stop();
+		stopFade();
 		m_action_rows[static_cast<size_t>(m_listening_action)]->setChecked(false);
+	}
 	else
 	{
 		m_pressed.clear();
@@ -474,6 +480,7 @@ void RollbackLauncher::stopListening()
 	InputManager::RemoveHook();
 	qApp->removeEventFilter(this);
 	m_right_hold_timer->stop();
+	stopFade();
 	m_action_rows[static_cast<size_t>(m_listening_action)]->setChecked(false);
 	m_listening_action = -1;
 	m_pressed.clear();
@@ -486,6 +493,32 @@ void RollbackLauncher::moveSelection(int delta)
 	startListening(static_cast<u32>(action));
 }
 
+void RollbackLauncher::startFade()
+{
+	// The selected action's button glyph fades out while right is held; it is gone when the hold clears it.
+	stopFade();
+	QLabel* glyph = m_action_glyphs[static_cast<size_t>(m_listening_action)];
+	if (glyph->text().isEmpty())
+		return;
+	QGraphicsOpacityEffect* effect = new QGraphicsOpacityEffect(glyph);
+	glyph->setGraphicsEffect(effect); // the label owns the effect
+	m_fading_glyph = glyph;
+	m_fade = new QPropertyAnimation(effect, "opacity", this);
+	m_fade->setDuration(m_right_hold_timer->interval());
+	m_fade->setStartValue(1.0);
+	m_fade->setEndValue(0.0);
+	m_fade->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void RollbackLauncher::stopFade()
+{
+	if (m_fade)
+		m_fade->stop(); // deletes itself
+	if (m_fading_glyph)
+		m_fading_glyph->setGraphicsEffect(nullptr); // full opacity again
+	m_fading_glyph = nullptr;
+}
+
 void RollbackLauncher::onRightHeld()
 {
 	// Holding right for a second clears the selected action (no button), like an empty slot in the game.
@@ -495,6 +528,7 @@ void RollbackLauncher::onRightHeld()
 	const u32 button = FucButtons::ButtonForAction(layout, static_cast<u32>(m_listening_action));
 	if (button < FucButtons::NUM_BUTTONS)
 		layout[button] = 0;
+	stopFade();
 	saveButtonLayout(layout);
 }
 
@@ -517,6 +551,7 @@ void RollbackLauncher::onBindingInput(InputBindingKey key, float value)
 		{
 			// A short press to the right: next column.
 			m_right_hold_timer->stop();
+			stopFade();
 			if (m_listening_action <= ROWS_PER_COLUMN)
 				moveSelection(ROWS_PER_COLUMN);
 		}
@@ -565,6 +600,7 @@ void RollbackLauncher::onBindingInput(InputBindingKey key, float value)
 				break;
 			case Role::Right:
 				m_right_hold_timer->start();
+				startFade();
 				break;
 			default:
 				break;

@@ -6,6 +6,7 @@
 #include "pcsx2/Input/InputManager.h"
 #include "pcsx2/Rollback/FucButtons.h"
 
+#include <QtCore/QPointer>
 #include <QtGui/QFont>
 #include <QtWidgets/QWidget>
 
@@ -20,6 +21,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QTimer;
+class QPropertyAnimation;
 
 // Rollback fork: start window for players of the Fate/unlimited codes package. Replaces the PCSX2 main
 // window while no game runs ([UI] RollbackLauncher = true): netplay (host or join with input delay),
@@ -68,6 +70,9 @@ private:
 	void stopListening();
 	/// Moves the selection by a number of rows (keeps listening).
 	void moveSelection(int delta);
+	/// Fades the selected glyph out while right is held (hold to clear).
+	void startFade();
+	void stopFade();
 
 	QLabel* m_bios_status = nullptr;
 	QLabel* m_game_status = nullptr;
@@ -96,6 +101,8 @@ private:
 	};
 	std::unordered_map<u64, Role> m_pressed;
 	QTimer* m_right_hold_timer = nullptr; // holding right for a second clears the selected action
+	QPointer<QPropertyAnimation> m_fade;
+	QPointer<QLabel> m_fading_glyph;
 
 	std::string m_bios_file;  // file name in the BIOS folder
 	std::string m_game_path;  // full path of the disc image
