@@ -2,7 +2,7 @@
 #
 #   .\tools\rollback\make-netplay-package.ps1 -ReferenceBios <bios .bin>
 #
-# Output: dist\FUC-Netplay-<date>.zip, built in dist\.staging\ (private to this script, deleted and
+# Output: dist\Mawarunco-<date>.zip, built in dist\.staging\ (private to this script, deleted and
 # recreated on every run; to test the package, unzip it somewhere else). The package contains the emulator, sanitized
 # settings with the start window switched on, the guide, licenses and the fork's source patch. It never
 # contains a BIOS or a disc image; the reference BIOS is only used to compute a hash for the start window.
@@ -18,8 +18,8 @@ param(
     # Also build a patch for players who already have the package: program, guide and source only, no
     # settings (their controller mapping, button config, delay and host address stay).
     [switch]$Update,
-    # Also build the installer dist\FUC-Netplay-Setup-<date>.exe (Inno Setup 6; ISCC.exe from
-    # <Inno Setup folder>, the PATH or -IsccPath).
+    # Also build the installer dist\Mawarunco-Setup-<date>.exe (Inno Setup 6). ISCC.exe comes from
+    # -IsccPath, the MAWARUNCO_ISCC environment variable, the PATH or the usual install folders.
     [switch]$Installer,
     [string]$IsccPath = ''
 )
@@ -50,7 +50,7 @@ $dist = Join-Path $repo 'dist'
 # Only this staging folder is ever deleted. Never point it at a folder someone uses (it may hold their
 # BIOS and disc image).
 $staging = Join-Path $dist '.staging'
-$out = Join-Path $staging 'FUC-Netplay'
+$out = Join-Path $staging 'Mawarunco'
 $template = Join-Path $PSScriptRoot 'package'
 
 if (-not (Test-Path (Join-Path $bin 'pcsx2-qtx64-clang.exe'))) { throw 'Release build missing (bin\pcsx2-qtx64-clang.exe).' }
@@ -131,12 +131,30 @@ if ($check -notmatch '(?m)^RollbackLauncher = true') { throw 'Settings have no [
 Get-Content (Join-Path $template 'README.txt') | Set-Content (Join-Path $out 'README.txt') -Encoding ascii
 
 # ---- Licenses and source (GPL: the changes to PCSX2 v2.8.2 as a patch) -------------------------------
-$ggrs = Get-ChildItem (Join-Path $CargoHome 'registry\src') -Directory -Recurse -Filter 'ggrs-0.13.0' | Select-Object -First 1
-if (-not $ggrs) { Write-Warning "GGRS sources not found under $CargoHome (license files missing)." }
-if ($ggrs) {
-    New-Item -ItemType Directory -Force (Join-Path $out 'docs\ggrs') | Out-Null
-    Get-ChildItem $ggrs.FullName -File -Filter 'LICENSE*' | Copy-Item -Destination (Join-Path $out 'docs\ggrs')
+# Rust crates linked into the program (3rdparty/ggrs-capi, from Cargo.lock): each crate's license files go
+# to docs\rust-licenses\<crate>-<version>, plus an overview with the license of each crate.
+$registry = Join-Path $CargoHome 'registry\src'
+$licenseDir = Join-Path $out 'docs\rust-licenses'
+New-Item -ItemType Directory -Force $licenseDir | Out-Null
+$overview = @('Rust crates linked into Mawarunco (3rdparty/ggrs-capi), with their licenses.', '')
+$lock = Get-Content (Join-Path $repo '3rdparty\ggrs-capi\Cargo.lock') -Raw
+foreach ($m in [regex]::Matches($lock, '(?ms)^\[\[package\]\]\s*name = "([^"]+)"\s*version = "([^"]+)"(.*?)(?=^\[\[package\]\]|\z)')) {
+    $name = $m.Groups[1].Value; $version = $m.Groups[2].Value
+    if ($m.Groups[3].Value -notmatch 'source = "registry') { continue } # the wrapper itself
+    $src = Get-ChildItem $registry -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName "$name-$version" } | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $src) { Write-Warning "Sources of $name $version not found under $registry (license missing)."; continue }
+    $license = (Select-String -Path (Join-Path $src 'Cargo.toml') -Pattern '^license\s*=\s*"([^"]+)"' |
+        Select-Object -First 1).Matches.Groups[1].Value
+    $overview += ('{0} {1}: {2}' -f $name, $version, $(if ($license) { $license } else { 'see files' }))
+    $files = Get-ChildItem $src -File | Where-Object { $_.Name -match '^(LICEN[CS]E|COPYING|NOTICE|UNLICENSE|COPYRIGHT)' }
+    if ($files) {
+        $dest = Join-Path $licenseDir "$name-$version"
+        New-Item -ItemType Directory -Force $dest | Out-Null
+        $files | Copy-Item -Destination $dest
+    }
 }
+$overview | Set-Content (Join-Path $licenseDir 'README.txt') -Encoding UTF8
 Push-Location $repo
 try {
     $head = (git rev-parse --short HEAD).Trim()
@@ -155,10 +173,10 @@ finally { Pop-Location }
 
 # ---- Zip ----------------------------------------------------------------------------------------------
 # Only the newest package (and patch) stays in dist, so it is always clear which one to send. Only zip
-# files and their checksum files are removed, never a folder (dist\FUC-Netplay may be a player's copy).
-Get-ChildItem $dist -File | Where-Object { $_.Name -match '^FUC-Netplay-((Patch-)?\d{8}\.zip|Setup-[\d.]+\.exe)(\.sha256\.txt)?$' } |
+# files and their checksum files are removed, never a folder (dist may hold a player's unpacked copy).
+Get-ChildItem $dist -File | Where-Object { $_.Name -match '^(FUC-Netplay|Mawarunco)-((Patch-)?\d{8}\.zip|Setup-[\d.]+\.exe)(\.sha256\.txt)?$' } |
     Remove-Item -Force
-$zip = Join-Path $dist ("FUC-Netplay-{0}.zip" -f (Get-Date -Format 'yyyyMMdd'))
+$zip = Join-Path $dist ("Mawarunco-{0}.zip" -f (Get-Date -Format 'yyyyMMdd'))
 Compress-Archive -Path (Join-Path $out '*') -DestinationPath $zip -CompressionLevel Optimal
 $size = (Get-Item $zip).Length / 1MB
 # SHA-256 next to the zip, so players can check that their copy is the one the organizer built.
@@ -174,14 +192,14 @@ if ($Update) {
     Copy-Item (Join-Path $out 'pcsx2-qtx64-clang.exe'), (Join-Path $out 'README.txt') -Destination $upd
     Copy-Item (Join-Path $out 'source\*') -Destination (Join-Path $upd 'source')
     @(
-        'Patch for an existing Fate/unlimited codes netplay folder.',
+        'Patch for an existing Mawarunco (Fate/unlimited codes netplay) folder.',
         '',
         'Close the program, then copy the contents of this zip into your folder and replace the files.',
         'Your settings (controller, button config, delay, host address) stay as they are.',
         'Old files from earlier versions that are no longer needed: Host.bat, Join.bat, Training.bat,',
         'Einstellungen.bat, netplay.ps1, start.p2s, LIESMICH.txt (you can delete them).'
     ) | Set-Content (Join-Path $upd 'PATCH_README.txt') -Encoding ascii
-    $uzip = Join-Path $dist ("FUC-Netplay-Patch-{0}.zip" -f (Get-Date -Format 'yyyyMMdd'))
+    $uzip = Join-Path $dist ("Mawarunco-Patch-{0}.zip" -f (Get-Date -Format 'yyyyMMdd'))
     if (Test-Path $uzip) { Remove-Item $uzip -Force }
     Compress-Archive -Path (Join-Path $upd '*') -DestinationPath $uzip -CompressionLevel Optimal
     $uhash = (Get-FileHash $uzip -Algorithm SHA256).Hash
@@ -193,15 +211,16 @@ if ($Update) {
 # ---- Installer ----------------------------------------------------------------------------------------------
 if ($Installer) {
     if (-not $IsccPath) {
-        $IsccPath = @('<Inno Setup folder>\ISCC.exe', (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source) |
+        $IsccPath = @($env:MAWARUNCO_ISCC, (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source,
+            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'), (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe')) |
             Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
     }
     if (-not $IsccPath) { throw 'Inno Setup compiler (ISCC.exe) not found, pass -IsccPath.' }
     $version = Get-Date -Format 'yyyy.MM.dd'
-    $iss = Join-Path $PSScriptRoot 'installer\fuc-netplay.iss'
+    $iss = Join-Path $PSScriptRoot 'installer\mawarunco.iss'
     & $IsccPath /Q "/DSourceDir=$out" "/DOutputDir=$dist" "/DAppVersion=$version" "/DRepoDir=$repo" $iss
     if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)." }
-    $setup = Join-Path $dist "FUC-Netplay-Setup-$version.exe"
+    $setup = Join-Path $dist "Mawarunco-Setup-$version.exe"
     $shash = (Get-FileHash $setup -Algorithm SHA256).Hash
     "$shash  $(Split-Path $setup -Leaf)" | Set-Content "$setup.sha256.txt" -Encoding ascii
     Write-Host ("Setup:   {0} ({1:N0} MB)" -f $setup, ((Get-Item $setup).Length / 1MB))

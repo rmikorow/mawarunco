@@ -1,68 +1,112 @@
-# PCSX2 rollback fork (Fate/unlimited codes)
+# Mawarunco
 
-An unofficial fork of [PCSX2](https://github.com/PCSX2/pcsx2) v2.8.2 that adds
-rollback netplay, built for **Fate/unlimited codes** (PS2, SLPM-55108). It is
-not affiliated with or supported by the PCSX2 team. Please do not report
-problems with this fork to the PCSX2 project.
+Rollback netplay for **Fate/unlimited codes** (PS2, SLPM-55108), built as an
+unofficial fork of [PCSX2](https://github.com/PCSX2/pcsx2) v2.8.2.
 
-All changes are on the `rollback` branch.
+Mawarunco is **not affiliated with or supported by the PCSX2 team**. Please do
+not report problems with it to the PCSX2 project. Fate/unlimited codes is a
+trademark of its owners; this project is not affiliated with Capcom, TYPE-MOON
+or cavia.
 
-## What it adds
+All changes are on the `rollback` branch. This repository contains **only
+source code**: no BIOS, no disc image, no game executable and no game data.
+Players need their own PS2 BIOS and their own copy of the game.
 
-- **Rollback core** (`pcsx2/Rollback/Rollback.*`): in-memory snapshots (~1.5 ms)
-  and restores (~2 ms) that are bit-identical. Several determinism problems
-  in emulation and savestates had to be fixed for that. The commit messages
-  describe each one.
-- **Controller input injection**: 18 bytes of DualShock 2 input per port and
-  frame. While a session runs, the game only sees the injected input.
-- **Netplay** (`pcsx2/Rollback/Netplay.*`) on top of
-  [GGRS](https://github.com/gschup/ggrs) (Rust, through the small C wrapper in
-  `3rdparty/ggrs-capi`):
-  - Direct IP: the host forwards one UDP port; the joining player needs
-    nothing.
-  - Selectable input delay and rollback depth.
-  - Desync detection with checksums over the gameplay state.
-  - Time synchronization between the peers.
-- **Boot shortcut** (`pcsx2/Rollback/BootShortcut.*`): boots the game from
-  power-on with a scripted input sequence, fast and without user input,
-  straight to the "Vs. 2P" character select with all characters unlocked.
-  Each player boots their own copy; no savestate is exchanged. Emulation is
-  deterministic, so both arrive at the same state.
-- **Run-ahead** (`pcsx2/Rollback/RunAhead.*`): one frame, offline and in
-  netplay, hides the game's internal input lag.
-- **Self-test and benchmark** (`pcsx2/Rollback/RollbackTest.*`) for
-  determinism.
-- The PCSX2 auto updater is disabled: it would replace this build with an
+## What it adds to PCSX2
+
+- **Rollback netplay** over direct IP, built on [GGRS](https://github.com/gschup/ggrs)
+  (Rust, through a small C wrapper in `3rdparty/ggrs-capi`).
+  - The host decides input delay (0–8) and rollback depth (1–8).
+  - Both sides check that they run the same program version.
+  - Checksums detect desyncs; on a desync, both sides log per-block memory
+    hashes for diagnosis.
+- **Rollback core** (`pcsx2/Rollback/Rollback.*`): in-memory snapshots, about
+  1.5 ms to save and 2 ms to restore, bit-identical on replay. About a dozen
+  determinism problems in emulation and savestates were fixed for that; the
+  commit messages describe each one.
+- **Run-ahead**: one frame by default, offline and in netplay. It hides the
+  game's internal input lag. Together with presenting each frame before the
+  frame limiter sleeps, input-to-screen latency went from 33.6 ms to 10.6 ms.
+- **Boot shortcut**: each player boots their own copy straight to the
+  character select of "Vs. 2P" or "Practice", with all characters unlocked.
+  No savestate is exchanged.
+- **Game-specific features**, written into game memory at runtime:
+  - the game's own button config per player, set once in the start window;
+  - player names next to the win counter in the versus HUD.
+- **Start window** (`pcsx2-qt/RollbackLauncher.*`) instead of the PCSX2 main
+  window in the player package: online (host/join), training, button config,
+  display (4:3 resolutions, window/fullscreen).
+- **Installer** (Inno Setup, `tools/rollback/installer`): per user, no admin
+  rights; asks for the player's BIOS and disc image.
+- The **PCSX2 auto updater is disabled**: it would replace this build with an
   official release.
+
+## Security and transparency
+
+The repository is public so that anyone can check what the program does.
+In short:
+
+- **Network:**
+  - The only network code added is netplay, active only during an online
+    session.
+  - It opens one UDP port: 7000 on the host; any free port when joining.
+  - Over it go a short handshake (program version, input delay, rollback
+    depth) and then GGRS messages, which carry controller input (18 bytes per
+    player and frame) and checksums.
+  - Received input is only used as button and stick values. It never becomes
+    a memory address, file name or command.
+  - Code: `3rdparty/ggrs-capi/src/lib.rs` (socket, handshake),
+    `pcsx2/Rollback/Netplay.cpp` (session, input handshake for button config
+    and names).
+- **Nothing is downloaded or started:** no other programs, no registry
+  changes, no autostart. The PCSX2 auto updater is off
+  (`pcsx2-qt/AutoUpdaterDialog.cpp`). PINE, PCSX2's local memory-access
+  interface, is off in the player package.
+- **Files:** besides PCSX2's usual folders (settings, logs, memory cards),
+  the program writes only diagnostic dumps into its own `logs` folder.
+  The start window copies the BIOS the player chooses into the `bios`
+  folder.
+- **Game memory changes:**
+  - The boot shortcut and the game features write a few values into
+    emulated PS2 memory: character unlock flags, the button config, and a
+    small HUD routine for player names. That routine is MIPS code for the
+    emulated PS2, not for the PC.
+  - Code: `pcsx2/Rollback/BootShortcut.cpp`, `pcsx2/Rollback/FucButtons.cpp`,
+    `pcsx2/Rollback/FucNames.cpp`.
+- **Releases:** every release is built from a tagged commit of this
+  repository, and its SHA-256 checksum is published with it.
 
 ## Playing
 
-Both players need their own BIOS and their own copy of the game. Neither is
-part of this repository. Both need the same BIOS version, the same game and
-identical settings:
+The easiest way is the installer from the releases. It asks for your BIOS
+and your disc image. Then start **Mawarunco**:
+
+- **Host:** forward UDP port 7000 in your router and click HOST.
+- **Join:** enter the host's IP address and click JOIN.
+
+The command line still works for testing:
 
 ```
 pcsx2-qtx64-clang.exe -batch -netplay "host=7000,delay=1,rollback=2,boot" -- game.iso
 pcsx2-qtx64-clang.exe -batch -netplay "join=<host ip>:7000,delay=1,rollback=2,boot" -- game.iso
 ```
 
-The session starts once both have finished the boot shortcut. If the two
-states differ (different BIOS or game), desync detection reports it at the
-first check.
-
-Both controller ports must be set to DualShock 2. Memory cards are off during
-netplay, and the clock and NVRAM use fixed defaults.
-`tools/rollback/make-netplay-package.ps1` builds a ready-to-use package with
-launcher scripts.
-
 ## Building (Windows)
 
 Same as PCSX2, plus a Rust toolchain:
 
-1. Dependencies: `.github/workflows/scripts/windows/build-dependencies.bat`
+1. Dependencies: `.github/workflows/scripts/windows/build-dependencies.bat`.
 2. Rust: a normal [rustup](https://rustup.rs) install (`cargo` on PATH), or set
    `RollbackRustDir` in an untracked `3rdparty/ggrs-capi/ggrs-capi.local.props`.
-3. `msbuild PCSX2_qt.sln "/p:Configuration=Release Clang" /p:Platform=x64`
+3. `msbuild PCSX2_qt.sln "/p:Configuration=Release Clang" /p:Platform=x64`.
+4. Package, patch and installer:
+   `tools/rollback/make-netplay-package.ps1 -ReferenceBios <bios> -Update -Installer`.
+   Inno Setup 6 is needed for the installer.
+
+## How it was made
+
+Mawarunco was developed with the help of an AI coding assistant (Claude, by
+Anthropic). Every commit made this way is marked "(AI-assisted)".
 
 ## License
 

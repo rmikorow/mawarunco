@@ -1,5 +1,5 @@
-Fate/unlimited codes - Online with rollback (test version)
-==========================================================
+Mawarunco - Fate/unlimited codes online with rollback (test version)
+===================================================================
 
 This is a modified PCSX2 (PS2 emulator) with rollback netcode for
 Fate/unlimited codes (PS2, SLPM-55108). Two players connect directly by IP
@@ -9,7 +9,7 @@ address. One hosts (player 1), the other joins (player 2).
 1. One-time setup
 -----------------
 
-Easiest: run "FUC-Netplay-Setup-<date>.exe". It installs without admin
+Easiest: run "Mawarunco-Setup-<date>.exe". It installs without admin
 rights, asks for your BIOS and your disc image, and creates shortcuts.
 Running a newer setup later updates the program and keeps your settings.
 With the zip package instead, do a) and b) below (or choose both files in
@@ -125,7 +125,13 @@ names).
 License and source code
 -----------------------
 
-PCSX2 is licensed under the GNU GPL version 3 (see docs\GPL.html). This
-package is based on PCSX2 v2.8.2 (https://github.com/PCSX2/pcsx2, tag
-v2.8.2). All changes are in the "source" folder as a patch. GGRS (rollback
-library) is licensed under MIT/Apache-2.0 (docs\ggrs).
+Mawarunco is an unofficial fork of PCSX2, licensed under the GNU GPL
+version 3 (see docs\GPL.html). It is based on PCSX2 v2.8.2
+(https://github.com/PCSX2/pcsx2, tag v2.8.2). The complete source code is
+public in the Mawarunco repository; the changes are also in the "source"
+folder as a patch. GGRS (rollback library) and the other Rust crates are
+licensed under MIT/Apache-2.0 and similar licenses (docs\rust-licenses).
+Other third-party licenses: docs\ThirdPartyLicenses.html.
+
+Fate/unlimited codes is a trademark of its owners. This project is not
+affiliated with Capcom, TYPE-MOON or cavia, nor with the PCSX2 team.

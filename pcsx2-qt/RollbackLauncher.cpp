@@ -154,7 +154,7 @@ RollbackLauncher::RollbackLauncher()
 	setObjectName(QStringLiteral("RollbackLauncher"));
 	setAttribute(Qt::WA_StyledBackground, true);
 	setStyleSheet(QString::fromUtf8(LAUNCHER_STYLE));
-	setWindowTitle(tr("Fate/unlimited codes - Rollback"));
+	setWindowTitle(QStringLiteral("Mawarunco"));
 	setWindowIcon(QtHost::GetAppIcon());
 	setMinimumSize(900, 600);
 
@@ -174,7 +174,7 @@ RollbackLauncher::RollbackLauncher()
 	// ---- Header ---------------------------------------------------------------------------------------------
 	QLabel* title = new QLabel(QStringLiteral("FATE / UNLIMITED CODES"), this);
 	title->setObjectName(QStringLiteral("Title"));
-	QLabel* subtitle = new QLabel(tr("ROLLBACK NETPLAY"), this);
+	QLabel* subtitle = new QLabel(tr("MAWARUNCO  -  ROLLBACK NETPLAY"), this);
 	subtitle->setObjectName(QStringLiteral("Subtitle"));
 	root->addWidget(title);
 	root->addWidget(subtitle);

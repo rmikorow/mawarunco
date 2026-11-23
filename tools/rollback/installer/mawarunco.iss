@@ -1,11 +1,12 @@
-; Installer for the Fate/unlimited codes rollback netplay build of PCSX2 (Inno Setup 6).
+; Installer for Mawarunco, the Fate/unlimited codes rollback netplay build of PCSX2 (Inno Setup 6).
 ;
 ; Built by tools\rollback\make-netplay-package.ps1 -Installer, which passes:
 ;   /DSourceDir=<staged package folder>  /DOutputDir=<dist>  /DAppVersion=<yyyy.MM.dd>  /DRepoDir=<repo root>
 ;
-; Installs per user (no admin rights) to %LOCALAPPDATA%\Programs\FUC-Netplay. A custom page asks for the
+; Installs per user (no admin rights) to %LOCALAPPDATA%\Programs\Mawarunco. A custom page asks for the
 ; player's own BIOS (copied into the "bios" folder) and disc image (only its path is kept; 4 GB are not
 ; copied). Running the installer again updates the program and keeps settings, button config and BIOS.
+; The AppId stays the same as in the first versions, so newer setups update older installations.
 ; It never contains a BIOS, a disc image or any game data.
 
 #ifndef AppVersion
@@ -14,17 +15,17 @@
 
 [Setup]
 AppId={{6E0F2C7A-6B53-4C55-9E7B-3F1D2A7C9B41}
-AppName=Fate/unlimited codes Netplay
+AppName=Mawarunco
 AppVersion={#AppVersion}
-AppVerName=Fate/unlimited codes Netplay {#AppVersion}
+AppVerName=Mawarunco {#AppVersion} (Fate/unlimited codes netplay)
 AppPublisher=Unofficial PCSX2 rollback fork
-DefaultDirName={localappdata}\Programs\FUC-Netplay
+DefaultDirName={localappdata}\Programs\Mawarunco
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputDir}
-OutputBaseFilename=FUC-Netplay-Setup-{#AppVersion}
+OutputBaseFilename=Mawarunco-Setup-{#AppVersion}
 SetupIconFile={#RepoDir}\pcsx2\windows\AppIcon.ico
 UninstallDisplayIcon={app}\pcsx2-qtx64-clang.exe
 LicenseFile={#RepoDir}\tools\rollback\installer\LICENSE-NOTICE.txt
@@ -48,8 +49,8 @@ Source: "{#SourceDir}\sstates\*"; DestDir: "{app}\sstates"; Flags: onlyifdoesnte
 Source: "{#SourceDir}\logs\*"; DestDir: "{app}\logs"; Flags: onlyifdoesntexist
 
 [Icons]
-Name: "{userprograms}\Fate unlimited codes Netplay"; Filename: "{app}\pcsx2-qtx64-clang.exe"; WorkingDir: "{app}"
-Name: "{userdesktop}\Fate unlimited codes Netplay"; Filename: "{app}\pcsx2-qtx64-clang.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{userprograms}\Mawarunco"; Filename: "{app}\pcsx2-qtx64-clang.exe"; WorkingDir: "{app}"
+Name: "{userdesktop}\Mawarunco"; Filename: "{app}\pcsx2-qtx64-clang.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [UninstallDelete]
 ; Files the program or the installer created. The "game", "sstates" and "memcards" folders stay: players may
@@ -68,7 +69,7 @@ Type: filesandordirs; Name: "{app}\cheats"
 Type: filesandordirs; Name: "{app}\patches"
 
 [Run]
-Filename: "{app}\pcsx2-qtx64-clang.exe"; WorkingDir: "{app}"; Description: "Start Fate/unlimited codes Netplay"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\pcsx2-qtx64-clang.exe"; WorkingDir: "{app}"; Description: "Start Mawarunco"; Flags: nowait postinstall skipifsilent
 
 [Code]
 const

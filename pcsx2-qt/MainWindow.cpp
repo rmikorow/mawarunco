@@ -1310,6 +1310,10 @@ void MainWindow::updateWindowTitle()
 	else if (isRenderingToMain())
 		main_title = display_title;
 
+	// Rollback fork: players of the package see the project name, also on the game window.
+	if (m_launcher_mode)
+		main_title = display_title = QStringLiteral("Mawarunco");
+
 	if (windowTitle() != main_title)
 		setWindowTitle(main_title);
 

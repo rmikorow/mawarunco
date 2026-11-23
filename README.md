@@ -1,3 +1,8 @@
+> **This is Mawarunco**, an unofficial PCSX2 fork with rollback netplay for
+> Fate/unlimited codes. It is not affiliated with the PCSX2 team. See
+> **[MAWARUNCO.md](MAWARUNCO.md)** for what it adds, how to build it and how
+> to check what it does. The rest of this file is the original PCSX2 README.
+
 # PCSX2
 
 ![Windows Build Status](https://img.shields.io/github/actions/workflow/status/PCSX2/pcsx2/windows_build_matrix.yml?label=%F0%9F%96%A5%EF%B8%8F%20Windows%20Builds)
