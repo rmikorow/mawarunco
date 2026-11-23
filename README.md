@@ -82,7 +82,8 @@ This repository is public so that anyone can check what the program does.
     you set one. The lobby sees your IP address like any web server.
   - The list shows names and settings, never IP addresses. A host's address
     goes only to the one player who joins (with the right code, if set).
-    Rooms and their address are deleted 30 seconds after the host leaves.
+    The address is stored encrypted and deleted with the room, at the
+    latest 30 seconds after the host leaves.
   - Everything the lobby sends is checked against a fixed format; the
     launcher only uses names, numbers and one IPv4 address from it.
   - Code: [`pcsx2-qt/LobbyClient.cpp`](pcsx2-qt/LobbyClient.cpp) (client),

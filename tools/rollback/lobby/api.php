@@ -14,8 +14,10 @@
 // Stored per room: host name, the country the host chose to show (optional; no IP lookup), room settings,
 // the host's IP address and port (only to hand them to the joiner), a hash of the room code and of the
 // host's token. Rooms disappear 30 s after the host's last
-// heartbeat, together with the IP address. Rate limits keep a salted hash of the client IP for at most
-// an hour. Nothing else is stored or logged by this script.
+// heartbeat, together with the IP address. The IP address is stored encrypted (AES-256-GCM, key derived
+// from the secret in the config), so the database alone does not reveal it; a keyed hash of it finds the
+// host's previous room. Rate limits keep a hash of the client IP with a key that changes every day, for at
+// most an hour. Nothing else is stored or logged by this script.
 //
 // Every value from a client is checked against a fixed format; all database access uses prepared
 // statements. Responses are JSON only.
@@ -131,9 +133,44 @@ function client_ip(): string
     return (string) ($_SERVER['REMOTE_ADDR'] ?? '');
 }
 
+/// Key for one purpose, derived from the secret in the config.
+function derived_key(array $config, string $purpose): string
+{
+    return hash_hmac('sha256', $purpose, (string) $config['salt'], true);
+}
+
+/// Rate-limit key of the client: the key changes every day (UTC), so entries cannot be linked across days.
 function client_key(array $config): string
 {
-    return hash_hmac('sha256', client_ip(), (string) $config['salt']);
+    return hash_hmac('sha256', client_ip(), derived_key($config, 'limits-' . gmdate('Y-m-d')));
+}
+
+/// Finds a host's previous room without storing the address in the clear.
+function host_key(array $config, string $ip): string
+{
+    return hash_hmac('sha256', $ip, derived_key($config, 'host'));
+}
+
+function encrypt_ip(array $config, string $ip): string
+{
+    $iv = random_bytes(12);
+    $tag = '';
+    $cipher = openssl_encrypt($ip, 'aes-256-gcm', derived_key($config, 'ip-encryption'), OPENSSL_RAW_DATA, $iv, $tag);
+    if ($cipher === false) {
+        fail(500, 'encryption unavailable');
+    }
+    return base64_encode($iv . $tag . $cipher);
+}
+
+function decrypt_ip(array $config, string $stored): ?string
+{
+    $raw = base64_decode($stored, true);
+    if ($raw === false || strlen($raw) < 29) {
+        return null;
+    }
+    $ip = openssl_decrypt(substr($raw, 28), 'aes-256-gcm', derived_key($config, 'ip-encryption'), OPENSSL_RAW_DATA,
+        substr($raw, 0, 12), substr($raw, 12, 16));
+    return ($ip === false) ? null : $ip;
 }
 
 function rate_limit(PDO $pdo, string $client, string $bucket, bool $count = true): void
@@ -232,15 +269,16 @@ switch ($action) {
             fail(422, 'hosting needs a public IPv4 address');
         }
         // One room per IP address: a new room replaces the old one.
-        $pdo->prepare('DELETE FROM mwr_rooms WHERE host_ip = ?')->execute([$ip]);
+        $host = host_key($config, $ip);
+        $pdo->prepare('DELETE FROM mwr_rooms WHERE host_key = ?')->execute([$host]);
         if ((int) $pdo->query('SELECT COUNT(*) FROM mwr_rooms')->fetchColumn() >= MAX_ROOMS) {
             fail(503, 'the lobby is full, try again later');
         }
         $id = bin2hex(random_bytes(8));
         $token = bin2hex(random_bytes(32));
-        $pdo->prepare('INSERT INTO mwr_rooms (id, token_hash, ver, host_name, country, host_ip, host_port, delay_frames,
-            rollback_frames, code_hash, status, guest_name, created, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)')
-            ->execute([$id, hash('sha256', $token), $ver, $name, $country, $ip, $port, $delay, $rollback,
+        $pdo->prepare('INSERT INTO mwr_rooms (id, token_hash, ver, host_name, country, host_key, host_ip, host_port, delay_frames,
+            rollback_frames, code_hash, status, guest_name, created, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)')
+            ->execute([$id, hash('sha256', $token), $ver, $name, $country, $host, encrypt_ip($config, $ip), $port, $delay, $rollback,
                 $code === null ? null : password_hash(strtoupper($code), PASSWORD_DEFAULT), 'open', $now, $now]);
         respond(200, ['ok' => true, 'id' => $id, 'token' => $token]);
 
@@ -274,7 +312,11 @@ switch ($action) {
         if ($take->rowCount() !== 1) {
             fail(404, 'the room is gone or already playing');
         }
-        respond(200, ['ok' => true, 'address' => $room['host_ip'], 'port' => (int) $room['host_port'],
+        $address = decrypt_ip($config, $room['host_ip']);
+        if ($address === null) {
+            fail(500, 'room data unreadable');
+        }
+        respond(200, ['ok' => true, 'address' => $address, 'port' => (int) $room['host_port'],
             'delay' => (int) $room['delay_frames'], 'rollback' => (int) $room['rollback_frames'], 'host' => $room['host_name']]);
 
     case 'close':

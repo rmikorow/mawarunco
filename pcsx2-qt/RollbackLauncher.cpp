@@ -470,8 +470,9 @@ RollbackLauncher::RollbackLauncher()
 	m_create_room_button = make_action(tr("CREATE ROOM  (PLAYER 1)"));
 	create_row->addWidget(m_create_room_button);
 	rooms->addLayout(create_row);
-	QLabel* rooms_hint = new QLabel(tr("A room is listed with your name and settings, not your IP address. The joiner gets "
-									   "your address to connect. Hosting still needs UDP port %1 forwarded in your router.")
+	QLabel* rooms_hint = new QLabel(tr("The room list shows your name, country and settings, never your IP address. The player "
+									   "who joins your room gets your IP address to connect to you, as with Direct. Hosting "
+									   "needs UDP port %1 forwarded in your router.")
 										.arg(port),
 		rooms_page);
 	rooms_hint->setObjectName(QStringLiteral("Hint"));
