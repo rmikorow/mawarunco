@@ -1,32 +1,139 @@
-> **This is Mawarunco**, an unofficial PCSX2 fork with rollback netplay for
-> Fate/unlimited codes. It is not affiliated with the PCSX2 team. See
-> **[MAWARUNCO.md](MAWARUNCO.md)** for what it adds, how to build it and how
-> to check what it does. The rest of this file is the original PCSX2 README.
+<p align="center">
+  <img src=".github/assets/mawarunco-banner.svg" alt="Mawarunco - rollback netplay for Fate/unlimited codes" width="100%">
+</p>
 
-# PCSX2
+<p align="center">
+  <a href="https://github.com/rmikorow/mawarunco/releases/latest"><b>Download for Windows</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://rmikorow.github.io/mawarunco/">Website</a>
+  &nbsp;·&nbsp;
+  <a href="#security-and-transparency">Security</a>
+  &nbsp;·&nbsp;
+  <a href="#building-windows">Build it yourself</a>
+</p>
 
-![Windows Build Status](https://img.shields.io/github/actions/workflow/status/PCSX2/pcsx2/windows_build_matrix.yml?label=%F0%9F%96%A5%EF%B8%8F%20Windows%20Builds)
-![Linux Build Status](https://img.shields.io/github/actions/workflow/status/PCSX2/pcsx2/linux_build_matrix.yml?label=%F0%9F%90%A7%20Linux%20Builds)
-![MacOS Build Status](https://img.shields.io/github/actions/workflow/status/PCSX2/pcsx2/macos_build_matrix.yml?label=%F0%9F%8D%8E%20MacOS%20Builds)
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/1f7c0d75fec74d6daa6adb084e5b4f71)](https://app.codacy.com/gh/PCSX2/pcsx2/dashboard?utm_source=github.com&utm_medium=referral&utm_content=PCSX2/pcsx2&utm_campaign=Badge_Grade)
-[![Discord Server](https://img.shields.io/discord/309643527816609793?color=%235CA8FA&label=PCSX2%20Discord&logo=discord&logoColor=white)](https://discord.com/invite/TCz3t9k)
+**Mawarunco** brings rollback netplay to **Fate/unlimited codes** (PS2,
+SLPM-55108). It is an unofficial fork of the PS2 emulator
+[PCSX2](https://github.com/PCSX2/pcsx2) v2.8.2.
 
-PCSX2 is a free and open-source PlayStation 2 (PS2) emulator. Its purpose is to emulate the PS2's hardware, using a combination of MIPS CPU [Interpreters](<https://en.wikipedia.org/wiki/Interpreter_(computing)>), [Recompilers](https://en.wikipedia.org/wiki/Dynamic_recompilation) and a [Virtual Machine](https://en.wikipedia.org/wiki/Virtual_machine) which manages hardware states and PS2 system memory. This allows you to play PS2 games on your PC, with many additional features and benefits.
+> Mawarunco is **not affiliated with or supported by the PCSX2 team**. Please
+> do not report problems with it to the PCSX2 project. Fate/unlimited codes is
+> a trademark of its owners; this project is not affiliated with Capcom,
+> TYPE-MOON or cavia.
 
-## Project Details
+This repository contains **only source code**: no BIOS, no disc image, no game
+executable and no game data. You need your own PS2 BIOS and your own copy of
+the game.
 
-PCSX2 has been in development for more than 20 years. Past versions could only run a few public domain game demos, but newer versions can run most games at full speed, including popular titles such as Final Fantasy X and Devil May Cry 3. Visit the [PCSX2 compatibility list](https://pcsx2.net/compat/) to check the latest compatibility status of games (with more than 2500 titles tested).
+## Features
 
-Installers and binaries for both stable and nightly builds are available from [our website](https://pcsx2.net/downloads/).
+| | |
+|---|---|
+| **Rollback netplay** | Direct IP, no VPN. The host forwards one UDP port; joining needs nothing. The host decides input delay (0–8) and rollback depth (1–8). Built on [GGRS](https://github.com/gschup/ggrs). |
+| **Low input latency** | Input-to-screen latency went from 33.6 ms to 10.6 ms: each frame is presented before the frame limiter sleeps, and 1 frame of run-ahead hides the game's internal lag. Run-ahead works offline and online. |
+| **No shared savestates** | Each player boots their own copy, straight to the character select of *Vs. 2P* or *Practice*, with all characters unlocked. |
+| **Your button config everywhere** | The game's own button config, set once in the start window: click an action, press the button. You keep your layout as player 1 or player 2. |
+| **Player names** | Shown above the health bar next to the win counter, e.g. `MAWARU / 2WINS`. |
+| **Start window** | Online, training, button config and display: 4:3 resolutions, window or fullscreen. |
+| **Installer** | Per user, no admin rights. It asks for your BIOS and disc image, and updates keep your settings. |
+| **Desync diagnostics** | Checksums every second; on a desync both sides log per-block memory hashes, so the cause can be found. |
 
-## System Requirements
+## Getting started
 
-PCSX2 supports Windows, Linux, and Mac platforms. Our [setup documentation page](https://pcsx2.net/docs/setup/requirements) contains additional details on software and hardware requirements.
+1. Download **`Mawarunco-Setup-<date>.exe`** from the
+   [latest release](https://github.com/rmikorow/mawarunco/releases/latest) and
+   run it. Choose your PS2 BIOS file and your disc image of Fate/unlimited
+   codes.
+2. Start **Mawarunco**. Under *Button config*, set up your controller and
+   buttons; under *Online*, enter your name.
+3. Play:
+   - **Host:** forward UDP port 7000 in your router, click *HOST*, and tell
+     the other player your public IP address.
+   - **Join:** enter the host's IP address and click *JOIN*.
 
-Please note that a BIOS dump from a legitimately-owned PS2 console is required to use the emulator. For more information, visit [this page](https://pcsx2.net/docs/setup/bios/).
+Both players need the same Mawarunco version and the same BIOS version.
+Windows SmartScreen may warn because the files are not signed ("More info" →
+"Run anyway"). Each release lists SHA-256 checksums for every file.
 
-## Contributing / Building
+## Security and transparency
 
-PCSX2 supports translation into other languages using [Crowdin](https://crowdin.com/project/pcsx2-emulator).
+This repository is public so that anyone can check what the program does.
 
-See the [Contribution Guide](https://pcsx2.net/docs/contributing/) for more info on how to contribute.
+- **Network:**
+  - The only network code added is netplay, active only during an online
+    session.
+  - It opens one UDP port: 7000 on the host; any free port when joining.
+  - Over it go a short handshake (program version, input delay, rollback
+    depth) and then GGRS messages, which carry controller input (18 bytes
+    per player and frame) and checksums.
+  - Received input is only used as button and stick values. It never
+    becomes a memory address, file name or command.
+  - Code: [`3rdparty/ggrs-capi/src/lib.rs`](3rdparty/ggrs-capi/src/lib.rs)
+    (socket, handshake), [`pcsx2/Rollback/Netplay.cpp`](pcsx2/Rollback/Netplay.cpp)
+    (session, input handshake for button config and names).
+- **Nothing is downloaded or started:** no other programs, no registry
+  changes, no autostart. The PCSX2 auto updater is off
+  ([`pcsx2-qt/AutoUpdaterDialog.cpp`](pcsx2-qt/AutoUpdaterDialog.cpp)).
+  PINE, PCSX2's local memory-access interface, is off in the player
+  package.
+- **Files:** besides PCSX2's usual folders (settings, logs, memory cards),
+  the program writes only diagnostic dumps into its own `logs` folder.
+  The start window copies the BIOS you choose into the `bios` folder.
+- **Game memory changes:**
+  - The boot shortcut and the game features write a few values into
+    emulated PS2 memory: character unlock flags, the button config, and a
+    small HUD routine for player names. That routine is MIPS code for the
+    emulated PS2, not for your PC.
+  - Code: [`BootShortcut.cpp`](pcsx2/Rollback/BootShortcut.cpp),
+    [`FucButtons.cpp`](pcsx2/Rollback/FucButtons.cpp),
+    [`FucNames.cpp`](pcsx2/Rollback/FucNames.cpp).
+- **Releases:** every release is built from a tagged commit of this
+  repository, and SHA-256 checksums are published with it.
+
+## What changed compared with PCSX2
+
+All changes are on the `rollback` branch, on top of PCSX2 v2.8.2. The commit
+messages explain each one.
+
+- [`pcsx2/Rollback/`](pcsx2/Rollback): rollback core, netplay, run-ahead,
+  latency measurement, determinism self-test, boot shortcut, game features.
+  - The rollback core takes in-memory snapshots in about 1.5 ms and restores
+    them in about 2 ms, bit-identical on replay.
+  - About a dozen determinism problems in emulation and savestates were
+    fixed for that.
+- [`3rdparty/ggrs-capi/`](3rdparty/ggrs-capi): small C wrapper around GGRS
+  (Rust).
+- [`pcsx2-qt/RollbackLauncher.*`](pcsx2-qt): the start window.
+- [`tools/rollback/`](tools/rollback): package, patch and installer scripts.
+- The PCSX2 auto updater is disabled: it would replace this build with an
+  official release.
+
+## Building (Windows)
+
+Same as PCSX2, plus a Rust toolchain:
+
+1. Dependencies: `.github/workflows/scripts/windows/build-dependencies.bat`.
+2. Rust: a normal [rustup](https://rustup.rs) install (`cargo` on PATH), or set
+   `RollbackRustDir` in an untracked `3rdparty/ggrs-capi/ggrs-capi.local.props`.
+3. `msbuild PCSX2_qt.sln "/p:Configuration=Release Clang" /p:Platform=x64`.
+4. Package, patch and installer (Inno Setup 6 needed for the installer):
+   `tools/rollback/make-netplay-package.ps1 -ReferenceBios <bios> -Update -Installer`.
+
+The command line also works for testing:
+
+```
+pcsx2-qtx64-clang.exe -batch -netplay "host=7000,delay=1,rollback=2,boot" -- game.iso
+pcsx2-qtx64-clang.exe -batch -netplay "join=<host ip>:7000,delay=1,rollback=2,boot" -- game.iso
+```
+
+## How it was made
+
+Mawarunco was developed with the help of an AI coding assistant (Claude, by
+Anthropic). Every commit made this way is marked "(AI-assisted)".
+
+## License and credits
+
+GPL-3.0-or-later, like PCSX2. All credit for the emulator goes to the
+[PCSX2 team](https://github.com/PCSX2/pcsx2); their original README is kept
+as [README-PCSX2.md](README-PCSX2.md). The GGRS wrapper in
+`3rdparty/ggrs-capi` is MIT OR Apache-2.0, like GGRS.

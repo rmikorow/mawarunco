@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="300" viewBox="0 0 1280 300" role="img" aria-label="Mawarunco - rollback netplay for Fate/unlimited codes">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d0a10"/>
+      <stop offset="0.55" stop-color="#1a0c14"/>
+      <stop offset="1" stop-color="#3a0e1b"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#c8a24a"/>
+      <stop offset="1" stop-color="#c8a24a" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.82" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#c8102e" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#c8102e" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="300" fill="url(#bg)"/>
+  <rect width="1280" height="300" fill="url(#glow)"/>
+  <!-- abstract circles, own design -->
+  <g fill="none" stroke="#c8a24a" stroke-opacity="0.18">
+    <circle cx="1050" cy="150" r="118"/>
+    <circle cx="1050" cy="150" r="92"/>
+    <circle cx="1050" cy="150" r="60" stroke-opacity="0.3"/>
+    <path d="M1050 32 L1152 209 L948 209 Z"/>
+    <path d="M1050 268 L948 91 L1152 91 Z"/>
+  </g>
+  <text x="72" y="148" fill="#f3e7c4" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="78" font-weight="800" letter-spacing="10">MAWARUNCO</text>
+  <rect x="72" y="172" width="560" height="2" fill="url(#gold)"/>
+  <text x="74" y="214" fill="#c8a24a" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="22" font-weight="600" letter-spacing="7">ROLLBACK NETPLAY FOR FATE/UNLIMITED CODES</text>
+  <text x="74" y="250" fill="#a99f93" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" letter-spacing="2">Unofficial PCSX2 fork  ·  PS2 (SLPM-55108)  ·  GPL-3.0</text>
+</svg>
