@@ -150,8 +150,11 @@ try {
 finally { Pop-Location }
 
 # ---- Zip ----------------------------------------------------------------------------------------------
+# Only the newest package (and patch) stays in dist, so it is always clear which one to send. Only zip
+# files and their checksum files are removed, never a folder (dist\FUC-Netplay may be a player's copy).
+Get-ChildItem $dist -File | Where-Object { $_.Name -match '^FUC-Netplay-(Patch-)?\d{8}\.zip(\.sha256\.txt)?$' } |
+    Remove-Item -Force
 $zip = Join-Path $dist ("FUC-Netplay-{0}.zip" -f (Get-Date -Format 'yyyyMMdd'))
-if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path (Join-Path $out '*') -DestinationPath $zip -CompressionLevel Optimal
 $size = (Get-Item $zip).Length / 1MB
 # SHA-256 next to the zip, so players can check that their copy is the one the organizer built.
