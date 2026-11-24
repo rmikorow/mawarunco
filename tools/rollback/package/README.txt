@@ -130,10 +130,17 @@ To end a game: close the game window; the start window comes back.
 5. After a test
 ---------------
 
-Please send the files in the "logs" folder to the organizer
-("emulog.txt" and the "emulog-<date>-<time>.txt" of the session). They
-contain connection and desync information (no personal data except file
-names).
+The "Logs" button at the bottom of the start window opens the logs folder.
+
+- Stutter, slowdown, the game getting slower over time: send the newest
+  "perf-<date>-<time>.txt". It describes your PC (CPU, graphics card,
+  memory) and how fast each part of the game ran; at the end it lists
+  warnings in plain words. It contains no IP addresses, file paths or
+  names, so you can share it as it is.
+- Desync or connection problems: also send "emulog.txt" and the
+  "emulog-<date>-<time>.txt" of the session. Those contain connection and
+  desync details, including the other player's IP address and file paths
+  from your PC.
 
 
 License and source code

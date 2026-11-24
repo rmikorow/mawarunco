@@ -34,7 +34,9 @@
 #include <QtCore/QLocale>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QTimer>
+#include <QtCore/QUrl>
 #include <QtGui/QCloseEvent>
+#include <QtGui/QDesktopServices>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QHideEvent>
 #include <QtGui/QShowEvent>
@@ -686,6 +688,17 @@ RollbackLauncher::RollbackLauncher()
 	QLabel* footer_hint = new QLabel(tr("Fullscreen: Alt+Enter   -   End a game: close the game window"), this);
 	footer_hint->setObjectName(QStringLiteral("Hint"));
 	footer->addWidget(footer_hint);
+	// Problems: players send the newest performance report (no addresses, paths or names in it) and, for
+	// desyncs, emulog.txt.
+	QPushButton* logs_button = new QPushButton(tr("Logs"), this);
+	logs_button->setObjectName(QStringLiteral("Tab"));
+	logs_button->setCursor(Qt::PointingHandCursor);
+	logs_button->setToolTip(tr("Opens the logs folder.\nStutter or slowdown: send the newest perf-....txt file.\n"
+							   "Desync: also send emulog.txt (it contains the other player's IP address)."));
+	connect(logs_button, &QPushButton::clicked, this, []() {
+		QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromStdString(EmuFolders::Logs)));
+	});
+	footer->addWidget(logs_button);
 	root->addLayout(footer);
 
 	connect(m_host_button, &QPushButton::clicked, this, &RollbackLauncher::onHostClicked);

@@ -96,7 +96,9 @@ This repository is public so that anyone can check what the program does.
   PINE, PCSX2's local memory-access interface, is off in the player
   package.
 - **Files:** besides PCSX2's usual folders (settings, logs, memory cards),
-  the program writes only diagnostic dumps into its own `logs` folder.
+  the program writes only diagnostic dumps and a performance report per
+  session (`logs/perf-*.txt`: PC, timings, memory; no addresses, paths or
+  names) into its own `logs` folder.
   The start window copies the BIOS you choose into the `bios` folder.
 - **Game memory changes:**
   - The boot shortcut and the game features write a few values into
@@ -139,6 +141,9 @@ Same as PCSX2, plus a Rust toolchain:
 3. `msbuild PCSX2_qt.sln "/p:Configuration=Release Clang" /p:Platform=x64`.
 4. Package, patch and installer (Inno Setup 6 needed for the installer):
    `tools/rollback/make-netplay-package.ps1 -ReferenceBios <bios> -Update -Installer`.
+5. Before a release, the soak test runs training and the netplay sync test
+   for a few minutes each and fails on memory growth or slowing frames:
+   `tools/rollback/perf-soak.ps1 -Iso <disc image>`.
 
 The build is named `pcsx2-qtx64-clang.exe` like upstream; the package script
 names it `Mawarunco.exe` for players. The command line also works for testing:
