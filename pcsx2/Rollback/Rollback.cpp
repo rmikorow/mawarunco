@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "Rollback/Rollback.h"
+#include "Rollback/PerfReport.h"
 
 #include "CDVD/CDVD.h"
 #include "R3000A.h"
@@ -12,6 +13,7 @@
 
 #include "common/Assertions.h"
 #include "common/Error.h"
+#include "common/Timer.h"
 
 #include "fmt/format.h"
 
@@ -38,6 +40,7 @@ void Rollback::Snapshot::Release()
 
 bool Rollback::Save(Snapshot& snapshot, Error* error)
 {
+	Common::Timer timer;
 	if (!SaveState_DownloadStateInto(snapshot.state, error))
 		return false;
 
@@ -53,15 +56,18 @@ bool Rollback::Save(Snapshot& snapshot, Error* error)
 	snapshot.inputs_injected = s_input_injection;
 	for (u32 port = 0; port < NUM_PORTS; port++)
 		snapshot.inputs[port] = s_input_injection ? GetInput(port) : PadInput{};
+	PerfReport::OnSnapshot(false, timer.GetTimeMilliseconds());
 	return true;
 }
 
 bool Rollback::Load(const Snapshot& snapshot, Error* error)
 {
+	Common::Timer timer;
 	if (!SaveState_LoadFromMemory(snapshot.state, error, false))
 		return false;
 
 	LoadExtras(snapshot);
+	PerfReport::OnSnapshot(true, timer.GetTimeMilliseconds());
 	return true;
 }
 

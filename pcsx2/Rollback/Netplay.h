@@ -32,6 +32,15 @@ namespace Netplay
 	/// True once both peers are connected and the session runs (any thread).
 	bool IsConnected();
 
+	/// Numbers for the performance report (CPU thread). Returns false without a running session.
+	struct PerfInfo
+	{
+		u64 rollbacks = 0;
+		u64 ping_ms = 0;
+		bool desync = false;
+	};
+	bool GetPerfInfo(PerfInfo* info);
+
 	/// Called before Cpu->Execute(). Returns false while the CPU must not run (waiting for the peer).
 	bool BeforeExecute();
 

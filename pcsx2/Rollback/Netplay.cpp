@@ -365,6 +365,22 @@ bool Netplay::IsConnected()
 	return s_connected.load(std::memory_order_acquire);
 }
 
+bool Netplay::GetPerfInfo(PerfInfo* info)
+{
+	if (!s_session || !s_was_running)
+		return false;
+	info->rollbacks = s_stats.rollbacks;
+	info->desync = (s_first_desync_frame >= 0);
+	info->ping_ms = 0;
+	if (!s_options.synctest)
+	{
+		GgrsNetworkStatsC ns = {};
+		if (ggrs_network_stats(s_session, (s_options.local_player == 0) ? 1 : 0, &ns) == 0)
+			info->ping_ms = ns.ping_ms;
+	}
+	return true;
+}
+
 bool Netplay::Start(const Options& opts, Error* error)
 {
 	// A real match needs a DualShock 2 on both ports on both machines; the sync test also runs with an

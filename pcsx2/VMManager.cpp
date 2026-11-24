@@ -32,6 +32,7 @@
 #include "Recording/InputRecording.h"
 #include "Recording/InputRecordingControls.h"
 #include "Rollback/Rollback.h"
+#include "Rollback/PerfReport.h"
 #include "Rollback/LatencyTest.h"
 #include "Rollback/BootShortcut.h"
 #include "Rollback/Netplay.h"
@@ -1716,6 +1717,7 @@ void VMManager::Shutdown(bool save_resume_state)
 	RollbackTest::Abort();
 	LatencyTest::Abort();
 	RunAhead::Abort();
+	PerfReport::OnShutdown();
 	BootShortcut::OnShutdown();
 	Netplay::Stop();
 
@@ -2336,6 +2338,13 @@ void VMManager::Internal::Throttle()
 {
 	if (s_target_speed == 0.0f || s_use_vsync_for_timing || Rollback::SkipThrottle())
 		return;
+
+	// Rollback fork: performance report (frame work before the sleep, frame end after it).
+	PerfReport::OnFrameWorkDone();
+	struct FrameEnd
+	{
+		~FrameEnd() { PerfReport::OnFrameEnd(); }
+	} frame_end;
 
 	const u64 uExpectedEnd =
 		s_limiter_frame_start +
