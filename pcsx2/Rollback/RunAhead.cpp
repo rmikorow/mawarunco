@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "Rollback/RunAhead.h"
+#include "SIO/Memcard/MemoryCardFile.h"
 #include "Rollback/BootShortcut.h"
 #include "Rollback/LatencyTest.h"
 #include "Rollback/Netplay.h"
@@ -121,12 +122,44 @@ void RunAhead::EndCycle()
 	LatencyTest::OnRunAheadInputPolled();
 }
 
+/// True if a memory card is inserted (cards are off in netplay and in boot shortcut sessions).
+static bool MemoryCardsInUse()
+{
+	for (uint port = 0; port < 2; port++)
+	{
+		for (uint slot = 0; slot < 4; slot++)
+		{
+			if (FileMcd_IsPresent(port, slot))
+				return true;
+		}
+	}
+	return false;
+}
+
 bool RunAhead::IsActive()
 {
 	Init();
 	// Netplay drives run-ahead itself; the self-test and the latency measurement need plain frames.
-	return s_frames > 0 && !Netplay::IsActive() && !BootShortcut::IsActive() && !RollbackTest::IsBusy() &&
-		   !LatencyTest::IsActive();
+	if (s_frames == 0 || Netplay::IsActive() || BootShortcut::IsActive() || RollbackTest::IsBusy() ||
+		LatencyTest::IsActive())
+	{
+		return false;
+	}
+	// Not with memory cards: the speculative frames write into the card file, and restoring the snapshot
+	// does not undo that, so the real frame repeats the game's card updates on data from the future and
+	// damages the card's file system. (Found by a tester porting the rollback core to KOF XI.) Mawarunco's
+	// start window always runs with the cards off, so this only matters when PCSX2 is used without it.
+	if (MemoryCardsInUse())
+	{
+		static bool s_told = false;
+		if (!s_told)
+		{
+			s_told = true;
+			Console.Warning("Run-ahead: off while a memory card is inserted (it would damage the card).");
+		}
+		return false;
+	}
+	return true;
 }
 
 void RunAhead::OnInputPolled()
