@@ -372,21 +372,38 @@ void GSState::ResetDrawBufferIdx()
 
 void GSState::ResetDrawBuffers()
 {
+	// Rollback fork: the memset below used to drop the buffer pointers without freeing them, and
+	// GrowVertexBuffer() then allocated new ones: about 2.3 MB leaked per GS reset. Upstream resets only on
+	// a state load; rollback and run-ahead restore the GS up to 60 times a second (GSState::Defrost ->
+	// Reset), so memory grew by gigabytes per minute. After the first allocation, the buffers and their
+	// capacity are kept. (Reported by a tester porting the rollback core to KOF XI.)
+	const bool keep = m_draw_buffers_allocated;
 	m_used_buffers_idx = 1;
-	m_max_vertex_count = 0;
+	if (!keep)
+		m_max_vertex_count = 0;
 
 	for (int i = 0; i < MAX_DRAW_BUFFERS; i++)
 	{
+		u16* const index_buff = keep ? m_index_buffers[i].buff : nullptr;
+		GSVertex* const vertex_buff = keep ? m_vertex_buffers[i].buff : nullptr;
+		GSVertex* const vertex_buff_copy = keep ? m_vertex_buffers[i].buff_copy : nullptr;
 		memset(&m_index_buffers[i], 0, sizeof(GSIndexBuff));
 		memset(&m_vertex_buffers[i], 0, sizeof(GSVertexBuff));
 		memset(&m_env_buffers[i], 0, sizeof(GSDrawBufferEnv));
+		m_index_buffers[i].buff = index_buff;
+		m_vertex_buffers[i].buff = vertex_buff;
+		m_vertex_buffers[i].buff_copy = vertex_buff_copy;
 		m_env_buffers[i].m_dirty_regs = 0xffff;
 		m_index = &m_index_buffers[i];
 		m_vertex = &m_vertex_buffers[i];
 		m_vertex_buffers[i].head = m_vertex_buffers[i].tail = m_vertex_buffers[i].next = 0;
 	}
 
-	GrowVertexBuffer();
+	if (!keep)
+	{
+		GrowVertexBuffer();
+		m_draw_buffers_allocated = true;
+	}
 	ResetDrawBufferIdx();
 }
 

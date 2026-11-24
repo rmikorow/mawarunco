@@ -136,6 +136,7 @@ protected:
 	int m_current_buffer_idx = 0;
 	bool m_recent_buffer_switch = false;
 	u32 m_max_vertex_count;
+	bool m_draw_buffers_allocated = false; // ResetDrawBuffers keeps the buffers once they exist (rollback fork)
 
 	struct GSVertexBuff
 	{
