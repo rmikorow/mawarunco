@@ -31,6 +31,7 @@ the game.
 |---|---|
 | **Rollback netplay** | Direct connection, no VPN. The host forwards one UDP port; joining needs nothing. The host decides input delay (0–8) and rollback depth (1–8). Built on [GGRS](https://github.com/gschup/ggrs). |
 | **Rooms** | A list of open rooms in the start window: create a room (open or with a code), or join one with a click. No typing of IP addresses; the list never shows them. |
+| **Spectators** | Up to 4 per match, also in a match that already runs: the spectator's game catches up at high speed, then shows the match live. Running matches are listed under the rooms. |
 | **Low input latency** | Input-to-screen latency went from 33.6 ms to 10.6 ms: each frame is presented before the frame limiter sleeps, and 1 frame of run-ahead hides the game's internal lag. Run-ahead works offline and online. |
 | **No shared savestates** | Each player boots their own copy, straight to the character select of *Vs. 2P* or *Practice*, with all characters unlocked. |
 | **Your button config everywhere** | The game's own button config, set once in the start window: click an action, press the button. You keep your layout as player 1 or player 2. |
@@ -52,6 +53,8 @@ the game.
      from the list and click *JOIN ROOM*.
    - **Direct (IP):** the host clicks *HOST* and tells the other player their
      public IP address; the other player enters it and clicks *JOIN*.
+   - **Watch:** pick a match under *Matches* and click *WATCH MATCH*, or enter
+     the host's IP address and click *WATCH*.
    - Hosting needs UDP port 7000 forwarded in the router, with rooms too.
 
 Both players need the same Mawarunco version and the same BIOS version.
@@ -73,8 +76,13 @@ This repository is public so that anyone can check what the program does.
     becomes a memory address, file name or command. Packets are decoded
     with a size limit; a host turns away connections from other versions
     or other programs and keeps waiting.
+  - Spectators ask the host for the players' confirmed input (36 bytes per
+    frame) and checksums on the same port. The host answers only after a
+    small challenge, so a forged sender address cannot make it send data to
+    someone else; at most 4 spectators, same program version only.
   - Code: [`3rdparty/ggrs-capi/src/lib.rs`](3rdparty/ggrs-capi/src/lib.rs)
-    (socket, handshake), [`pcsx2/Rollback/Netplay.cpp`](pcsx2/Rollback/Netplay.cpp)
+    (socket, handshake), [`3rdparty/ggrs-capi/src/spectate.rs`](3rdparty/ggrs-capi/src/spectate.rs)
+    (spectators), [`pcsx2/Rollback/Netplay.cpp`](pcsx2/Rollback/Netplay.cpp)
     (session, input handshake for button config and names).
 - **Room list (lobby):**
   - Used only while the online page is open or you host a room. HTTPS only,
@@ -83,7 +91,8 @@ This repository is public so that anyone can check what the program does.
     chose (optional), input delay, rollback depth, port and a room code if
     you set one. The lobby sees your IP address like any web server.
   - The list shows names and settings, never IP addresses. A host's address
-    goes only to the one player who joins (with the right code, if set).
+    goes only to the one player who joins and to up to 4 spectators who
+    click *WATCH MATCH* (with the right code, if set).
     The address is stored encrypted and deleted with the room, at the
     latest 30 seconds after the host leaves.
   - Everything the lobby sends is checked against a fixed format; the
