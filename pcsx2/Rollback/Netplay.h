@@ -31,6 +31,8 @@ namespace Netplay
 
 	/// True once both peers are connected and the session runs (any thread).
 	bool IsConnected();
+	/// Spectators watching the local player's match (host side, any thread).
+	u32 SpectatorCount();
 
 	/// Numbers for the performance report (CPU thread). Returns false without a running session.
 	struct PerfInfo

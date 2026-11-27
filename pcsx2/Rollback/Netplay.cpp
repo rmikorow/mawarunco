@@ -171,6 +171,7 @@ namespace Netplay
 	static std::array<LoggedChecksum, SPEC_LOG> s_spec_sums;
 	static int s_spec_published = 0; // next frame to give to the spectators
 	static u32 s_spec_count_shown = 0;
+	static std::atomic<u32> s_spec_count{0}; // s_spec_count_shown for other threads (launcher heartbeat)
 	static void PublishConfirmed();
 	static std::string SpectatorVersion();
 
@@ -420,6 +421,11 @@ bool Netplay::IsConnected()
 	return s_connected.load(std::memory_order_acquire);
 }
 
+u32 Netplay::SpectatorCount()
+{
+	return s_spec_count.load(std::memory_order_acquire);
+}
+
 bool Netplay::GetPerfInfo(PerfInfo* info)
 {
 	if (!s_session || !s_was_running)
@@ -568,6 +574,7 @@ void Netplay::Stop()
 		s_stats.frames, s_stats.rollbacks, s_stats.resimulated, s_stats.max_rollback, s_stats.waits));
 	if (!s_options.synctest)
 		ggrs_spec_host_end(s_session);
+	s_spec_count.store(0, std::memory_order_release);
 	ggrs_free(s_session);
 	s_session = nullptr;
 	s_connected.store(false, std::memory_order_release);
@@ -1126,6 +1133,7 @@ void Netplay::PublishConfirmed()
 	if (watching != s_spec_count_shown)
 	{
 		s_spec_count_shown = watching;
+		s_spec_count.store(watching, std::memory_order_release);
 		Console.WriteLn(fmt::format("Netplay: {} spectator(s)", watching));
 		Host::AddIconOSDMessage("NetplaySpectators", ICON_FA_EYE,
 			(watching == 0) ? std::string("Netplay: no spectators") : fmt::format("Netplay: {} watching", watching), 5.0f);

@@ -2,11 +2,13 @@
 // Mawarunco lobby: a list of open netplay rooms. The match itself never goes through this server: the
 // joiner gets the host's IP address and port and connects directly (UDP), as with a typed-in address.
 //
-//   GET  ?action=list&ver=<build>                          open rooms of this build (never IP addresses),
-//                                                          players online, matches running
+//   GET  ?action=list&ver=<build>                          open rooms and running matches of this build
+//                                                          (never IP addresses), players online
 //   POST action=create  ver, name, delay, rollback, port, [code], [country]   -> id, token
-//   POST action=heartbeat  id, token                       keeps the room listed -> status, guest
+//   POST action=heartbeat  id, token, [spectators]         keeps the room listed -> status, guest
 //   POST action=join    id, ver, name, [code]              -> host address, port, delay, rollback
+//   POST action=watch   id, ver, [code]                    spectate: -> host address, port (up to 4 spectators,
+//                                                          the host's game enforces the limit)
 //   POST action=reopen  id, token                          the joiner did not connect: list the room again
 //   POST action=close   id, token
 //
@@ -36,6 +38,7 @@ const COUNTRY_PATTERN = '/^[A-Z]{2}$/';   // ISO 3166-1 alpha-2, chosen by the h
 const VER_PATTERN = '/^[0-9a-f]{40}$/';
 const ID_PATTERN = '/^[0-9a-f]{16}$/';
 const TOKEN_PATTERN = '/^[0-9a-f]{64}$/';
+const MAX_SPECTATORS = 4;
 
 // Requests per client IP and window: [limit, seconds].
 const LIMITS = [
@@ -44,6 +47,7 @@ const LIMITS = [
     'heartbeat' => [60, 60],
     'join' => [15, 600],        // each join reveals one host address: keep harvesting slow
     'join_fail' => [10, 600],   // wrong room codes
+    'watch' => [15, 600],       // like join: each one reveals a host address
     'reopen' => [20, 600],
     'close' => [20, 60],
 ];
@@ -275,9 +279,23 @@ switch ($action) {
                 'age' => $now - (int) $room['created'],
             ];
         }
-        $playing = $pdo->prepare('SELECT COUNT(*) FROM mwr_rooms WHERE ver = ? AND status = ?');
+        // Running matches of this build, to watch.
+        $playing = $pdo->prepare('SELECT id, host_name, guest_name, country, code_hash, spectators, created FROM mwr_rooms
+            WHERE ver = ? AND status = ? ORDER BY created DESC LIMIT ' . MAX_ROOMS);
         $playing->execute([$ver, 'playing']);
-        $matches = (int) $playing->fetchColumn();
+        $watch = [];
+        foreach ($playing as $room) {
+            $watch[] = [
+                'id' => $room['id'],
+                'host' => $room['host_name'],
+                'guest' => $room['guest_name'] ?? '',
+                'country' => $room['country'],
+                'locked' => $room['code_hash'] !== null,
+                'spectators' => (int) $room['spectators'],
+                'age' => $now - (int) $room['created'],
+            ];
+        }
+        $matches = count($watch);
         // Players online (all versions), from data the lobby keeps anyway: launchers that looked at the room
         // list in the last minute (one rate-limit entry each), hosts waiting in an open room, two players per
         // running match. Players behind one IP address count once.
@@ -286,7 +304,7 @@ switch ($action) {
         $open = (int) $pdo->query("SELECT COUNT(*) FROM mwr_rooms WHERE status = 'open'")->fetchColumn();
         $all_matches = (int) $pdo->query("SELECT COUNT(*) FROM mwr_rooms WHERE status = 'playing'")->fetchColumn();
         $online = (int) $browsing->fetchColumn() + $open + 2 * $all_matches;
-        respond(200, ['ok' => true, 'rooms' => $rooms, 'playing' => $matches, 'online' => $online]);
+        respond(200, ['ok' => true, 'rooms' => $rooms, 'matches' => $watch, 'playing' => $matches, 'online' => $online]);
 
     case 'create':
         $ver = param('ver', VER_PATTERN);
@@ -318,7 +336,9 @@ switch ($action) {
 
     case 'heartbeat':
         $room = owned_room($pdo);
-        $pdo->prepare('UPDATE mwr_rooms SET last_seen = ? WHERE id = ?')->execute([$now, $room['id']]);
+        $spectators = optional_param('spectators', '/^[0-' . MAX_SPECTATORS . ']$/');
+        $pdo->prepare('UPDATE mwr_rooms SET last_seen = ?, spectators = ? WHERE id = ?')
+            ->execute([$now, $spectators === null ? (int) $room['spectators'] : (int) $spectators, $room['id']]);
         respond(200, ['ok' => true, 'status' => $room['status'], 'guest' => $room['guest_name']]);
 
     case 'join':
@@ -352,6 +372,34 @@ switch ($action) {
         }
         respond(200, ['ok' => true, 'address' => $address, 'port' => (int) $room['host_port'],
             'delay' => (int) $room['delay_frames'], 'rollback' => (int) $room['rollback_frames'], 'host' => $room['host_name']]);
+
+    case 'watch':
+        $id = param('id', ID_PATTERN);
+        $ver = param('ver', VER_PATTERN);
+        $code = optional_param('code', CODE_PATTERN);
+        rate_limit($pdo, $client, 'join_fail', false);
+        $query = $pdo->prepare('SELECT * FROM mwr_rooms WHERE id = ?');
+        $query->execute([$id]);
+        $room = $query->fetch();
+        if (!$room || ($room['status'] !== 'playing' && $room['status'] !== 'open')) {
+            fail(404, 'the match is gone');
+        }
+        if ($room['ver'] !== $ver) {
+            fail(409, 'the host uses another Mawarunco version');
+        }
+        if ($room['code_hash'] !== null && ($code === null || !password_verify(strtoupper($code), $room['code_hash']))) {
+            rate_limit($pdo, $client, 'join_fail');
+            fail(403, 'wrong room code');
+        }
+        if ((int) $room['spectators'] >= MAX_SPECTATORS) {
+            fail(409, 'four spectators already watch this match');
+        }
+        $address = decrypt_ip($config, $room['host_ip']);
+        if ($address === null) {
+            fail(500, 'room data unreadable');
+        }
+        respond(200, ['ok' => true, 'address' => $address, 'port' => (int) $room['host_port'], 'host' => $room['host_name'],
+            'guest' => $room['guest_name'] ?? '']);
 
     case 'reopen':
         // The host's game saw no connection from the joiner: back into the list for the next player.

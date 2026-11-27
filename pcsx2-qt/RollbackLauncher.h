@@ -67,6 +67,8 @@ private Q_SLOTS:
 	void refreshRooms();
 	void onCreateRoomClicked();
 	void onJoinRoomClicked();
+	void onWatchMatchClicked();
+	void onWatchDirectClicked();
 	void sendHeartbeat();
 
 private:
@@ -123,6 +125,9 @@ private:
 	QLineEdit* m_room_code = nullptr;
 	QPushButton* m_create_room_button = nullptr;
 	QPushButton* m_join_room_button = nullptr;
+	QTreeWidget* m_match_list = nullptr;          // running matches (to watch)
+	QPushButton* m_watch_button = nullptr;        // watch the selected match
+	QPushButton* m_watch_direct_button = nullptr; // watch the match of the typed-in host address
 	LobbyClient* m_lobby = nullptr;
 	QTimer* m_room_refresh = nullptr;   // room list, every few seconds while shown
 	QTimer* m_room_heartbeat = nullptr; // keeps the own room listed

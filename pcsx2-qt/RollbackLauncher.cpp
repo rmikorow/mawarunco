@@ -386,6 +386,28 @@ RollbackLauncher::RollbackLauncher()
 	m_join_room_button->setEnabled(false);
 	online->addWidget(m_join_room_button);
 	online->addSpacing(4);
+
+	// ---- Running matches: watch as a spectator ----
+	online->addWidget(make_section(tr("MATCHES")));
+	m_match_list = new QTreeWidget(online_page);
+	m_match_list->setHeaderLabels({tr("MATCH"), tr("COUNTRY"), tr("ACCESS"), tr("SPECTATORS"), tr("RUNNING FOR")});
+	m_match_list->setRootIsDecorated(false);
+	m_match_list->setUniformRowHeights(true);
+	m_match_list->setAlternatingRowColors(true);
+	m_match_list->setSelectionMode(QAbstractItemView::SingleSelection);
+	m_match_list->setEditTriggers(QAbstractItemView::NoEditTriggers);
+	m_match_list->header()->setStretchLastSection(false);
+	m_match_list->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+	for (int column = 1; column < 5; column++)
+		m_match_list->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
+	m_match_list->setMinimumHeight(110);
+	online->addWidget(m_match_list);
+	m_watch_button = make_action(tr("WATCH MATCH  (SPECTATOR)"));
+	m_watch_button->setToolTip(tr("Up to 4 spectators per match. You can also join a match that already runs: your game "
+								  "catches up first, then you watch live."));
+	m_watch_button->setEnabled(false);
+	online->addWidget(m_watch_button);
+	online->addSpacing(4);
 	QHBoxLayout* create_row = new QHBoxLayout();
 	m_room_code = new QLineEdit(online_page);
 	m_room_code->setPlaceholderText(tr("Room code (optional, for a private room)"));
@@ -473,6 +495,9 @@ RollbackLauncher::RollbackLauncher()
 	join_row->addWidget(m_host_address, 1);
 	m_join_button = make_action(tr("JOIN  (PLAYER 2)"));
 	join_row->addWidget(m_join_button);
+	m_watch_direct_button = make_action(tr("WATCH"));
+	m_watch_direct_button->setToolTip(tr("Watch the match of this host as a spectator (up to 4)."));
+	join_row->addWidget(m_watch_direct_button);
 	online->addLayout(join_row);
 	online->addStretch(1);
 
@@ -488,6 +513,11 @@ RollbackLauncher::RollbackLauncher()
 		[this]() { m_join_room_button->setEnabled(!m_room_list->selectedItems().isEmpty() && m_create_room_button->isEnabled()); });
 	connect(m_room_list, &QTreeWidget::itemDoubleClicked, this, &RollbackLauncher::onJoinRoomClicked);
 	connect(m_join_room_button, &QPushButton::clicked, this, &RollbackLauncher::onJoinRoomClicked);
+	connect(m_match_list, &QTreeWidget::itemSelectionChanged, this,
+		[this]() { m_watch_button->setEnabled(!m_match_list->selectedItems().isEmpty() && m_create_room_button->isEnabled()); });
+	connect(m_match_list, &QTreeWidget::itemDoubleClicked, this, &RollbackLauncher::onWatchMatchClicked);
+	connect(m_watch_button, &QPushButton::clicked, this, &RollbackLauncher::onWatchMatchClicked);
+	connect(m_watch_direct_button, &QPushButton::clicked, this, &RollbackLauncher::onWatchDirectClicked);
 	connect(m_create_room_button, &QPushButton::clicked, this, &RollbackLauncher::onCreateRoomClicked);
 	connect(m_room_code, &QLineEdit::returnPressed, this, &RollbackLauncher::onCreateRoomClicked);
 
@@ -1211,9 +1241,10 @@ void RollbackLauncher::showAgain()
 	// The game has ended (or did not start): an own room is no longer open.
 	closeOwnRoom();
 	refreshStatus();
-	for (QPushButton* b : {m_host_button, m_join_button, m_practice_button, m_create_room_button})
+	for (QPushButton* b : {m_host_button, m_join_button, m_watch_direct_button, m_practice_button, m_create_room_button})
 		b->setEnabled(true);
 	m_join_room_button->setEnabled(!m_room_list->selectedItems().isEmpty());
+	m_watch_button->setEnabled(!m_match_list->selectedItems().isEmpty());
 	show();
 	raise();
 	activateWindow();
@@ -1278,6 +1309,29 @@ void RollbackLauncher::refreshRooms()
 			if (room.id == selected_id)
 				item->setSelected(true);
 		}
+		const QList<QTreeWidgetItem*> match_selection = m_match_list->selectedItems();
+		const QString selected_match = match_selection.isEmpty() ? QString() : match_selection.first()->data(0, Qt::UserRole).toString();
+		m_match_list->clear();
+		for (const LobbyClient::Match& match : result.value->matches)
+		{
+			QTreeWidgetItem* item = new QTreeWidgetItem(m_match_list);
+			item->setText(0, match.guest.isEmpty() ? match.host : tr("%1  vs  %2").arg(match.host, match.guest));
+			item->setText(1, match.country.isEmpty() ? QStringLiteral("-") : match.country);
+			if (!match.country.isEmpty())
+				item->setToolTip(1, QLocale::territoryToString(QLocale::codeToTerritory(match.country)));
+			item->setText(2, match.locked ? tr("code") : tr("open"));
+			item->setText(3, QStringLiteral("%1 / 4").arg(match.spectators));
+			item->setText(4, (match.age_seconds < 60) ? tr("%1 s").arg(match.age_seconds) : tr("%1 min").arg(match.age_seconds / 60));
+			item->setData(0, Qt::UserRole, match.id);
+			item->setData(0, Qt::UserRole + 1, match.locked);
+			item->setData(0, Qt::UserRole + 2, match.spectators);
+			for (int column = 1; column < 5; column++)
+				item->setTextAlignment(column, Qt::AlignCenter);
+			if (match.id == selected_match)
+				item->setSelected(true);
+		}
+		m_watch_button->setEnabled(!m_match_list->selectedItems().isEmpty() && m_create_room_button->isEnabled());
+
 		// Numbers only (no names), so rich text is safe here.
 		m_online_count->setText(QStringLiteral("<span style='color:#6fd08c'>&#9679;</span> ") +
 			((result.value->online == 1) ? tr("1 player online") : tr("%1 players online").arg(result.value->online)));
@@ -1357,7 +1411,8 @@ void RollbackLauncher::sendHeartbeat()
 		m_room_heartbeat->stop();
 		return;
 	}
-	m_lobby->heartbeat(m_room_id, m_room_token, [this, id = m_room_id](LobbyClient::Result<LobbyClient::Heartbeat> result) {
+	const int spectators = Netplay::IsConnected() ? static_cast<int>(Netplay::SpectatorCount()) : -1;
+	m_lobby->heartbeat(m_room_id, m_room_token, spectators, [this, id = m_room_id](LobbyClient::Result<LobbyClient::Heartbeat> result) {
 		if (id != m_room_id)
 			return; // answer for a room that is already closed
 		if (!result.value)
@@ -1456,6 +1511,76 @@ void RollbackLauncher::onJoinRoomClicked()
 	});
 }
 
+void RollbackLauncher::onWatchMatchClicked()
+{
+	if (QtHost::IsVMValid() || !m_room_id.isEmpty() || m_match_list->selectedItems().isEmpty() ||
+		!m_create_room_button->isEnabled())
+	{
+		return;
+	}
+	if (!refreshStatus())
+	{
+		QMessageBox::warning(this, windowTitle(), tr("BIOS or game missing (see below)."));
+		return;
+	}
+	const QTreeWidgetItem* item = m_match_list->selectedItems().first();
+	if (item->data(0, Qt::UserRole + 2).toInt() >= 4)
+	{
+		QMessageBox::information(this, windowTitle(), tr("Four spectators already watch this match."));
+		return;
+	}
+	const QString id = item->data(0, Qt::UserRole).toString();
+	std::string code;
+	if (item->data(0, Qt::UserRole + 1).toBool())
+	{
+		bool ok = false;
+		const QString entered = QInputDialog::getText(this, windowTitle(), tr("Room code of %1:").arg(item->text(0)),
+			QLineEdit::Normal, QString(), &ok).trimmed();
+		if (!ok)
+			return;
+		static const QRegularExpression valid(QStringLiteral("^[A-Za-z0-9]{4,16}$"));
+		if (!valid.match(entered).hasMatch())
+		{
+			QMessageBox::information(this, windowTitle(), tr("A room code has 4 to 16 letters or digits."));
+			return;
+		}
+		code = entered.toStdString();
+	}
+	m_watch_button->setEnabled(false);
+	m_rooms_status->setText(tr("Connecting as a spectator ..."));
+	m_lobby->watchRoom(id, code, [this](LobbyClient::Result<LobbyClient::WatchInfo> result) {
+		if (!result.value)
+		{
+			m_watch_button->setEnabled(!m_match_list->selectedItems().isEmpty());
+			m_rooms_status->setText(result.error);
+			QMessageBox::warning(this, windowTitle(), tr("Could not watch the match: %1").arg(result.error));
+			refreshRooms();
+			return;
+		}
+		// The address from the lobby is not shown or stored.
+		const LobbyClient::WatchInfo& info = *result.value;
+		if (!boot(fmt::format("spectate={}:{},boot", info.address, info.port), nullptr))
+			m_watch_button->setEnabled(!m_match_list->selectedItems().isEmpty());
+	});
+}
+
+void RollbackLauncher::onWatchDirectClicked()
+{
+	std::string address = m_host_address->text().trimmed().toStdString();
+	static const QRegularExpression valid(QStringLiteral("^[0-9A-Fa-f.:\\[\\]]+$"));
+	if (address.empty() || !valid.match(QString::fromStdString(address)).hasMatch())
+	{
+		QMessageBox::warning(this, windowTitle(), tr("Please enter the host's IP address, e.g. 203.0.113.5"));
+		m_host_address->setFocus();
+		return;
+	}
+	const bool ipv6 = address.starts_with('[');
+	const bool has_port = ipv6 ? (address.find("]:") != std::string::npos) : (address.find(':') != std::string::npos);
+	if (!has_port)
+		address += fmt::format(":{}", Host::GetBaseIntSettingValue(SECTION, "Port", DEFAULT_PORT));
+	boot(fmt::format("spectate={},boot", address), nullptr);
+}
+
 void RollbackLauncher::onHostClicked()
 {
 	const int port = Host::GetBaseIntSettingValue(SECTION, "Port", DEFAULT_PORT);
@@ -1543,7 +1668,8 @@ bool RollbackLauncher::boot(const std::string& netplay_spec, const char* shortcu
 	}
 
 	// Stays visible until the game runs (onVMStarted hides it). If the boot fails, the buttons come back.
-	for (QPushButton* b : {m_host_button, m_join_button, m_practice_button, m_create_room_button, m_join_room_button})
+	for (QPushButton* b : {m_host_button, m_join_button, m_watch_direct_button, m_practice_button, m_create_room_button,
+			 m_join_room_button, m_watch_button})
 		b->setEnabled(false);
 	QTimer::singleShot(15000, this, [this]() {
 		if (!QtHost::IsVMValid() && isVisible())

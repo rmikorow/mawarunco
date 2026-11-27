@@ -212,6 +212,26 @@ void LobbyClient::listRooms(std::function<void(Result<RoomList>)> done)
 			if (list.rooms.size() >= 200)
 				break;
 		}
+		for (const QJsonValue& v : obj->value(QStringLiteral("matches")).toArray())
+		{
+			const QJsonObject r = v.toObject();
+			Match match;
+			match.id = r.value(QStringLiteral("id")).toString();
+			match.host = r.value(QStringLiteral("host")).toString();
+			match.guest = r.value(QStringLiteral("guest")).toString();
+			if (!IsRoomId(match.id) || !IsName(match.host))
+				continue;
+			if (!IsName(match.guest))
+				match.guest.clear();
+			match.locked = r.value(QStringLiteral("locked")).toBool();
+			if (const QString country = r.value(QStringLiteral("country")).toString(); IsCountry(country))
+				match.country = country;
+			match.spectators = IntIn(r.value(QStringLiteral("spectators")), 0, 4).value_or(0);
+			match.age_seconds = IntIn(r.value(QStringLiteral("age")), 0, 1 << 30).value_or(0);
+			list.matches.push_back(std::move(match));
+			if (list.matches.size() >= 200)
+				break;
+		}
 		result.value = std::move(list);
 		done(std::move(result));
 	});
@@ -241,9 +261,12 @@ void LobbyClient::createRoom(const std::string& name, const std::string& country
 	});
 }
 
-void LobbyClient::heartbeat(const QString& id, const QString& token, std::function<void(Result<Heartbeat>)> done)
+void LobbyClient::heartbeat(const QString& id, const QString& token, int spectators, std::function<void(Result<Heartbeat>)> done)
 {
-	post(fmt::format("action=heartbeat&id={}&token={}", id.toStdString(), token.toStdString()),
+	std::string form = fmt::format("action=heartbeat&id={}&token={}", id.toStdString(), token.toStdString());
+	if (spectators >= 0 && spectators <= 4)
+		form += fmt::format("&spectators={}", spectators);
+	post(form,
 		[done](int status, const QByteArray& body, const QString& transport_error) {
 			Result<Heartbeat> result;
 			const std::optional<QJsonObject> obj = ParseReply(status, body, transport_error, &result.error);
@@ -293,6 +316,40 @@ void LobbyClient::joinRoom(const QString& id, const std::string& name, const std
 		info.delay = *delay;
 		info.rollback = *rollback;
 		info.host = host;
+		result.value = std::move(info);
+		done(std::move(result));
+	});
+}
+
+void LobbyClient::watchRoom(const QString& id, const std::string& code, std::function<void(Result<WatchInfo>)> done)
+{
+	std::string form = fmt::format("action=watch&id={}&ver={}", id.toStdString(), BuildVersion::GitHash);
+	if (!code.empty())
+		form += "&code=" + Encode(code);
+	post(form, [done](int status, const QByteArray& body, const QString& transport_error) {
+		Result<WatchInfo> result;
+		const std::optional<QJsonObject> obj = ParseReply(status, body, transport_error, &result.error);
+		if (!obj)
+		{
+			done(std::move(result));
+			return;
+		}
+		// As with joining: only a public IPv4 address and a port leave this program.
+		const QString address = obj->value(QStringLiteral("address")).toString();
+		const std::optional<int> port = IntIn(obj->value(QStringLiteral("port")), 1024, 65535);
+		const QString host = obj->value(QStringLiteral("host")).toString();
+		const QString guest = obj->value(QStringLiteral("guest")).toString();
+		if (!IsIPv4(address) || !port || !IsName(host))
+		{
+			result.error = Tr("Unexpected answer from the lobby.");
+			done(std::move(result));
+			return;
+		}
+		WatchInfo info;
+		info.address = address.toStdString();
+		info.port = *port;
+		info.host = host;
+		info.guest = IsName(guest) ? guest : QString();
 		result.value = std::move(info);
 		done(std::move(result));
 	});

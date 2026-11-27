@@ -38,9 +38,22 @@ public:
 		int age_seconds = 0;
 	};
 
+	/// A running match (to watch).
+	struct Match
+	{
+		QString id;
+		QString host;
+		QString guest;
+		QString country;
+		bool locked = false;
+		int spectators = 0;
+		int age_seconds = 0;
+	};
+
 	struct RoomList
 	{
 		std::vector<Room> rooms;
+		std::vector<Match> matches;
 		int playing = 0; // matches running (this version)
 		int online = 0;  // players online (all versions), estimated by the lobby
 	};
@@ -58,6 +71,14 @@ public:
 		int delay = 0;
 		int rollback = 0;
 		QString host;
+	};
+
+	struct WatchInfo
+	{
+		std::string address; // IPv4
+		int port = 0;
+		QString host;
+		QString guest;
 	};
 
 	struct Heartbeat
@@ -84,7 +105,10 @@ public:
 	/// country: ISO 3166-1 alpha-2 code the host chose to show, or empty.
 	void createRoom(const std::string& name, const std::string& country, int delay, int rollback, int port,
 		const std::string& code, std::function<void(Result<CreatedRoom>)> done);
-	void heartbeat(const QString& id, const QString& token, std::function<void(Result<Heartbeat>)> done);
+	/// spectators: the host's current number of spectators, or -1 to leave it unchanged.
+	void heartbeat(const QString& id, const QString& token, int spectators, std::function<void(Result<Heartbeat>)> done);
+	/// Spectating: the host address of a running match.
+	void watchRoom(const QString& id, const std::string& code, std::function<void(Result<WatchInfo>)> done);
 	void joinRoom(const QString& id, const std::string& name, const std::string& code,
 		std::function<void(Result<JoinInfo>)> done);
 	/// The joiner never connected: lists the room again.

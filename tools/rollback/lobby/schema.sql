@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS mwr_rooms (
     code_hash VARCHAR(255) NULL,
     status VARCHAR(8) NOT NULL,
     guest_name VARCHAR(20) NULL,
+    spectators TINYINT NOT NULL DEFAULT 0,  -- reported by the host's game (heartbeat)
     created INT NOT NULL,
     last_seen INT NOT NULL,
     INDEX rooms_list (ver, status, last_seen),
