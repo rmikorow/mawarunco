@@ -105,6 +105,41 @@ int32_t ggrs_network_stats(GgrsSession* s, uint32_t player, GgrsNetworkStatsC* o
 /// Remote peer address "ip:port" (learned on the host side). Returns the length, 0 while unknown.
 size_t ggrs_peer_address(GgrsSession* s, char* buf, size_t buf_len);
 
+/* Spectators (see src/spectate.rs). The host keeps the confirmed inputs of both players from frame 0 on
+ * and serves them to up to four spectators on the session socket; a spectator plays them back from frame 0,
+ * fast while it is behind, so it can join a running match. */
+#define GGRS_SPEC_FRAME_BYTES (2 * GGRS_INPUT_SIZE)
+#define GGRS_SPEC_CONNECTING 0
+#define GGRS_SPEC_WAITING 1  ///< the host's match has not started yet
+#define GGRS_SPEC_RUNNING 2
+#define GGRS_SPEC_REJECTED 4 ///< see ggrs_spec_reason
+#define GGRS_SPEC_FULL 5     ///< four spectators already watch
+#define GGRS_SPEC_TIMEOUT 6  ///< nothing heard from the host for 15 s
+
+/* Host side, on a P2P session. */
+void ggrs_spec_host_version(GgrsSession* s, const uint8_t* version, size_t len);
+/// Confirmed inputs of `frame` (GGRS_SPEC_FRAME_BYTES), in frame order. Returns 0 or GGRS_ERR_OTHER.
+int32_t ggrs_spec_host_push(GgrsSession* s, uint32_t frame, const uint8_t* inputs);
+/// Checksum of the state at the start of `frame`, for the spectators' sync check.
+void ggrs_spec_host_checksum(GgrsSession* s, uint32_t frame, uint64_t lo, uint64_t hi);
+uint32_t ggrs_spec_host_count(GgrsSession* s);
+void ggrs_spec_host_end(GgrsSession* s);
+
+/* Spectator side. */
+typedef struct GgrsSpec GgrsSpec;
+typedef struct GgrsSpecStatusC
+{
+	int32_t state;        ///< GGRS_SPEC_*
+	uint32_t host_frames; ///< frames the host has confirmed
+	uint32_t buffered;    ///< frames here from the next one to take on
+	bool ended;           ///< the host's session has ended
+} GgrsSpecStatusC;
+GgrsSpec* ggrs_spec_open(const char* host_addr, const uint8_t* version, size_t version_len);
+int32_t ggrs_spec_poll(GgrsSpec* spec, GgrsSpecStatusC* out);
+bool ggrs_spec_take(GgrsSpec* spec, uint32_t frame, uint8_t* inputs_out, bool* has_checksum, uint64_t* checksum_lo, uint64_t* checksum_hi);
+size_t ggrs_spec_reason(GgrsSpec* spec, char* buf, size_t buf_len);
+void ggrs_spec_free(GgrsSpec* spec);
+
 #ifdef __cplusplus
 }
 #endif

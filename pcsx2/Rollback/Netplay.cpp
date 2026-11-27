@@ -61,6 +61,7 @@ namespace Netplay
 		bool dump = false;       // diagnostics: write the snapshots of frames 0 and 60 to the log folder
 		int desync_test = -1;    // testing: player 2 changes one byte of EE RAM in this frame (desync diagnostics)
 		bool show_ping = false;  // shows the ping to the other player in the game
+		bool spectate = false;   // watch the host's match (remote = host address)
 	};
 
 	static constexpr u32 NUM_PLAYERS = Rollback::NUM_PORTS;
@@ -152,6 +153,45 @@ namespace Netplay
 	static bool StartRunAhead();
 	static void ContinueRunAhead();
 
+	// Spectators, host side: the inputs of every advance (raw, with the session handshake) and the checksums of
+	// saved frames are kept for a while; once GGRS has confirmed a frame, its inputs go to the spectators
+	// (ggrs_spec_host_push). The log only has to cover the frames between an advance and its confirmation.
+	static constexpr u32 SPEC_LOG = 512;
+	struct LoggedFrame
+	{
+		int frame = -1;
+		std::array<Rollback::PadInput, NUM_PLAYERS> inputs;
+	};
+	struct LoggedChecksum
+	{
+		int frame = -1;
+		u64 lo = 0, hi = 0;
+	};
+	static std::array<LoggedFrame, SPEC_LOG> s_spec_log;
+	static std::array<LoggedChecksum, SPEC_LOG> s_spec_sums;
+	static int s_spec_published = 0; // next frame to give to the spectators
+	static u32 s_spec_count_shown = 0;
+	static void PublishConfirmed();
+	static std::string SpectatorVersion();
+
+	// Spectator side: plays the host's confirmed frames from frame 0 on (after the same boot shortcut as the
+	// players), without the frame limiter while it is behind.
+	static GgrsSpec* s_spec = nullptr;
+	static int s_spec_frame = 0;      // next frame to play
+	static bool s_spec_need = false;  // the previous frame has run, the next one needs its inputs
+	static bool s_spec_live = false;  // caught up with the match
+	static bool s_spec_starved = false;
+	static bool s_spec_desync_shown = false;
+	static u32 s_spec_checks = 0;
+	static Common::Timer s_spec_msg_timer;
+	static std::unique_ptr<Rollback::Snapshot> s_spec_snapshot;
+	static bool SpectateBeforeExecute();
+	static void SpectateStatus(const std::string& text, float seconds);
+
+	/// Inputs of one session frame for the game: decodes the session handshake in the first frames (both peers
+	/// and spectators alike), then sets both ports.
+	static void ApplyFrameInputs(int frame, std::array<Rollback::PadInput, NUM_PLAYERS>& inputs);
+
 	static bool Start(const Options& opts, Error* error);
 	static void LogStats();
 	static void ProcessRequests();
@@ -232,6 +272,21 @@ bool Netplay::SetLaunchOptions(std::string_view spec, Error* error)
 				return false;
 			}
 			opts.local_player = 1;
+			opts.local_port = 0;
+			opts.remote = (value.find(':') == std::string_view::npos) ? fmt::format("{}:{}", value, DEFAULT_PORT) :
+																		std::string(value);
+			have_remote = true;
+		}
+		else if (key == "spectate")
+		{
+			// Spectator: watches the match of the host at "ip[:port]" (the host's port, no forwarding needed here).
+			if (value.empty())
+			{
+				Error::SetString(error, "Netplay: 'spectate' needs the host address, e.g. spectate=203.0.113.5:7000");
+				return false;
+			}
+			opts.spectate = true;
+			opts.local_player = 0;
 			opts.local_port = 0;
 			opts.remote = (value.find(':') == std::string_view::npos) ? fmt::format("{}:{}", value, DEFAULT_PORT) :
 																		std::string(value);
@@ -347,7 +402,7 @@ bool Netplay::SetLaunchOptions(std::string_view spec, Error* error)
 
 	if (!opts.synctest && !have_remote)
 	{
-		Error::SetString(error, "Netplay: use 'host', 'join=ip[:port]' or 'synctest'.");
+		Error::SetString(error, "Netplay: use 'host', 'join=ip[:port]', 'spectate=ip[:port]' or 'synctest'.");
 		return false;
 	}
 
@@ -357,7 +412,7 @@ bool Netplay::SetLaunchOptions(std::string_view spec, Error* error)
 
 bool Netplay::IsActive()
 {
-	return s_session || s_net || s_pending.has_value();
+	return s_session || s_net || s_spec || s_pending.has_value();
 }
 
 bool Netplay::IsConnected()
@@ -383,6 +438,35 @@ bool Netplay::GetPerfInfo(PerfInfo* info)
 
 bool Netplay::Start(const Options& opts, Error* error)
 {
+	if (opts.spectate)
+	{
+		if (!Rollback::BeginInputInjection(error, false))
+			return false;
+		const std::string version = SpectatorVersion();
+		s_spec = ggrs_spec_open(opts.remote.c_str(), reinterpret_cast<const u8*>(version.data()), version.size());
+		if (!s_spec)
+		{
+			Rollback::EndInputInjection();
+			Error::SetString(error, fmt::format("GGRS: {}", LastGgrsError()));
+			return false;
+		}
+		s_options = opts;
+		s_spec_frame = 0;
+		s_spec_need = true;
+		s_spec_live = false;
+		s_spec_starved = false;
+		s_spec_desync_shown = false;
+		s_spec_checks = 0;
+		s_spec_msg_timer.Reset();
+		s_handshake = {};
+		s_names = {};
+		s_bios_warning_shown = false;
+		s_stats = {};
+		Console.WriteLn(fmt::format("Netplay: spectating the match of {}", opts.remote));
+		SpectateStatus(fmt::format("Spectator: connecting to {} ...", opts.remote), Host::OSD_INFO_DURATION);
+		return true;
+	}
+
 	// A real match needs a DualShock 2 on both ports on both machines; the sync test also runs with an
 	// empty port 2.
 	if (!Rollback::BeginInputInjection(error, !opts.synctest))
@@ -429,6 +513,10 @@ bool Netplay::Start(const Options& opts, Error* error)
 	s_names = {};
 	s_handshake_sent = false;
 	s_bios_warning_shown = false;
+	s_spec_log = {};
+	s_spec_sums = {};
+	s_spec_published = 0;
+	s_spec_count_shown = 0;
 
 	if (opts.synctest)
 	{
@@ -449,6 +537,17 @@ bool Netplay::Start(const Options& opts, Error* error)
 
 void Netplay::Stop()
 {
+	if (s_spec)
+	{
+		ggrs_spec_free(s_spec);
+		s_spec = nullptr;
+		s_spec_snapshot.reset();
+		Rollback::EndInputInjection();
+		RunAhead::ClearFlags();
+		s_exit_pending = false;
+		Console.WriteLn(fmt::format("Netplay: stopped spectating after {} frames", s_spec_frame));
+		return;
+	}
 	// A session that has not started yet stays pending (the boot state load also calls this).
 	if (s_net)
 	{
@@ -467,6 +566,8 @@ void Netplay::Stop()
 	Console.WriteLn(fmt::format("Netplay: session ended after {} frames, {} rollbacks ({} frames resimulated, max {}), "
 								"{} waits",
 		s_stats.frames, s_stats.rollbacks, s_stats.resimulated, s_stats.max_rollback, s_stats.waits));
+	if (!s_options.synctest)
+		ggrs_spec_host_end(s_session);
 	ggrs_free(s_session);
 	s_session = nullptr;
 	s_connected.store(false, std::memory_order_release);
@@ -618,6 +719,11 @@ bool Netplay::StartSession(Error* error)
 	cfg.sparse_saving = s_options.sparse_saving;
 	cfg.fps = 60;
 	s_session = ggrs_p2p_start_net(s_net, &cfg);
+	if (s_session)
+	{
+		const std::string version = SpectatorVersion();
+		ggrs_spec_host_version(s_session, reinterpret_cast<const u8*>(version.data()), version.size());
+	}
 	char peer[64] = {};
 	ggrs_net_peer_address(s_net, peer, sizeof(peer));
 	ggrs_net_free(s_net);
@@ -675,6 +781,14 @@ void Netplay::OnExecutionExited()
 		}
 	}
 
+	if (s_spec)
+	{
+		// A spectated frame has run.
+		s_spec_need = true;
+		s_stats.frames++;
+		return;
+	}
+
 	if (!s_session)
 		return;
 
@@ -706,6 +820,8 @@ void Netplay::OnExecutionExited()
 
 bool Netplay::BeforeExecute()
 {
+	if (s_spec)
+		return SpectateBeforeExecute();
 	if (s_net && !s_session)
 	{
 		// Room handshake: the CPU does not run yet.
@@ -728,6 +844,8 @@ bool Netplay::BeforeExecute()
 
 bool Netplay::AdvanceSession()
 {
+	if (!s_options.synctest)
+		PublishConfirmed();
 	ggrs_poll(s_session);
 	HandleEvents();
 	if (!s_session)
@@ -862,6 +980,8 @@ void Netplay::ProcessRequests()
 									   (s_options.desync_interval > 0 && (frame % s_options.desync_interval) == 0);
 			const auto [lo, hi] = want_checksum ? Checksum(*s_ring[slot], frame) : std::pair<u64, u64>(0, 0);
 			ggrs_request_save(s_session, index, slot, want_checksum, lo, hi);
+			if (want_checksum && !s_options.synctest && frame >= 0)
+				s_spec_sums[static_cast<u32>(frame) % SPEC_LOG] = {frame, lo, hi};
 			if (s_options.dump && (frame <= 12 || frame == 60))
 				DumpSnapshot(*s_ring[slot], frame);
 		}
@@ -882,49 +1002,9 @@ void Netplay::ProcessRequests()
 		{
 			std::array<Rollback::PadInput, NUM_PLAYERS> inputs;
 			ggrs_request_inputs(s_session, index, reinterpret_cast<u8*>(inputs.data()), nullptr);
-			// Session handshake (see s_handshake): decode, keep it away from the game, apply both layouts.
-			if (!s_options.synctest && s_advance_frame >= 0 && s_advance_frame <= HANDSHAKE_FRAME)
-			{
-				for (u32 port = 0; port < NUM_PLAYERS; port++)
-				{
-					if (std::optional<Handshake> hs = DecodeHandshake(inputs[port]))
-					{
-						s_handshake[port] = hs;
-						inputs[port] = Rollback::PadInput{};
-					}
-					else if (std::optional<FucNames::Name> name = DecodeName(inputs[port]))
-					{
-						s_names[port] = name;
-						inputs[port] = Rollback::PadInput{};
-					}
-				}
-				if (s_advance_frame == HANDSHAKE_FRAME)
-				{
-					for (u32 port = 0; port < NUM_PLAYERS; port++)
-						FucButtons::Write(port, s_handshake[port] ? s_handshake[port]->layout : FucButtons::Default());
-					FucNames::Apply(s_names[0].value_or(FucNames::Name{}), s_names[1].value_or(FucNames::Name{}));
-					// Once both are known (possibly only in a resimulated frame): log, and warn about different BIOS
-					// versions, the usual reason why two boots differ.
-					if (s_handshake[0] && s_handshake[1] && !s_bios_warning_shown)
-					{
-						s_bios_warning_shown = true;
-						auto name_text = [](const std::optional<FucNames::Name>& n) {
-							return n ? std::string(n->data(), strnlen(n->data(), n->size())) : std::string();
-						};
-						Console.WriteLn(fmt::format("Netplay: button layouts P1 {} P2 {}, BIOS {:08x} / {:08x}, names '{}' / '{}'",
-							FucButtons::ToString(s_handshake[0]->layout), FucButtons::ToString(s_handshake[1]->layout),
-							s_handshake[0]->bios, s_handshake[1]->bios, name_text(s_names[0]), name_text(s_names[1])));
-						if (s_handshake[0]->bios != s_handshake[1]->bios)
-						{
-							Console.Error("Netplay: the players use different BIOS versions");
-							Host::AddIconOSDMessage("NetplayBios", ICON_FA_TRIANGLE_EXCLAMATION,
-								"Netplay: the players use different BIOS versions. The game may desync.", 30.0f);
-						}
-					}
-				}
-			}
-			for (u32 port = 0; port < NUM_PLAYERS; port++)
-				Rollback::SetInput(port, inputs[port]);
+			if (!s_options.synctest && s_advance_frame >= 0)
+				s_spec_log[static_cast<u32>(s_advance_frame) % SPEC_LOG] = {s_advance_frame, inputs};
+			ApplyFrameInputs(s_advance_frame, inputs);
 
 			// Testing the desync diagnostics: a deliberate difference on one peer, also in resimulated frames.
 			if (s_options.desync_test >= 0 && s_advance_frame == s_options.desync_test && s_options.local_player == 1)
@@ -971,6 +1051,207 @@ void Netplay::ProcessRequests()
 	if (s_ra_state == RunAheadState::Real && StartRunAhead())
 		return; // the CPU emulates the first speculative frame
 	s_need_advance = true;
+}
+
+void Netplay::ApplyFrameInputs(int frame, std::array<Rollback::PadInput, NUM_PLAYERS>& inputs)
+{
+	// Session handshake (see s_handshake): decode, keep it away from the game, apply both layouts.
+	if (!s_options.synctest && frame >= 0 && frame <= HANDSHAKE_FRAME)
+	{
+		for (u32 port = 0; port < NUM_PLAYERS; port++)
+		{
+			if (std::optional<Handshake> hs = DecodeHandshake(inputs[port]))
+			{
+				s_handshake[port] = hs;
+				inputs[port] = Rollback::PadInput{};
+			}
+			else if (std::optional<FucNames::Name> name = DecodeName(inputs[port]))
+			{
+				s_names[port] = name;
+				inputs[port] = Rollback::PadInput{};
+			}
+		}
+		if (frame == HANDSHAKE_FRAME)
+		{
+			for (u32 port = 0; port < NUM_PLAYERS; port++)
+				FucButtons::Write(port, s_handshake[port] ? s_handshake[port]->layout : FucButtons::Default());
+			FucNames::Apply(s_names[0].value_or(FucNames::Name{}), s_names[1].value_or(FucNames::Name{}));
+			// Once both are known (possibly only in a resimulated frame): log, and warn about different BIOS
+			// versions, the usual reason why two boots differ.
+			if (s_handshake[0] && s_handshake[1] && !s_bios_warning_shown)
+			{
+				s_bios_warning_shown = true;
+				auto name_text = [](const std::optional<FucNames::Name>& n) {
+					return n ? std::string(n->data(), strnlen(n->data(), n->size())) : std::string();
+				};
+				Console.WriteLn(fmt::format("Netplay: button layouts P1 {} P2 {}, BIOS {:08x} / {:08x}, names '{}' / '{}'",
+					FucButtons::ToString(s_handshake[0]->layout), FucButtons::ToString(s_handshake[1]->layout),
+					s_handshake[0]->bios, s_handshake[1]->bios, name_text(s_names[0]), name_text(s_names[1])));
+				if (s_handshake[0]->bios != s_handshake[1]->bios)
+				{
+					Console.Error("Netplay: the players use different BIOS versions");
+					Host::AddIconOSDMessage("NetplayBios", ICON_FA_TRIANGLE_EXCLAMATION,
+						"Netplay: the players use different BIOS versions. The game may desync.", 30.0f);
+				}
+			}
+		}
+	}
+	for (u32 port = 0; port < NUM_PLAYERS; port++)
+		Rollback::SetInput(port, inputs[port]);
+}
+
+std::string Netplay::SpectatorVersion()
+{
+	return fmt::format("FUC1;ver={}", BuildVersion::GitHash);
+}
+
+void Netplay::PublishConfirmed()
+{
+	const int confirmed = ggrs_confirmed_frame(s_session);
+	while (s_spec_published <= confirmed)
+	{
+		const u32 at = static_cast<u32>(s_spec_published) % SPEC_LOG;
+		const LoggedFrame& lf = s_spec_log[at];
+		if (lf.frame != s_spec_published)
+			break; // not advanced yet
+		if (ggrs_spec_host_push(s_session, static_cast<u32>(lf.frame), reinterpret_cast<const u8*>(lf.inputs.data())) != 0)
+			break;
+		const LoggedChecksum& sum = s_spec_sums[at];
+		if (sum.frame == lf.frame)
+			ggrs_spec_host_checksum(s_session, static_cast<u32>(sum.frame), sum.lo, sum.hi);
+		s_spec_published++;
+	}
+
+	const u32 watching = ggrs_spec_host_count(s_session);
+	if (watching != s_spec_count_shown)
+	{
+		s_spec_count_shown = watching;
+		Console.WriteLn(fmt::format("Netplay: {} spectator(s)", watching));
+		Host::AddIconOSDMessage("NetplaySpectators", ICON_FA_EYE,
+			(watching == 0) ? std::string("Netplay: no spectators") : fmt::format("Netplay: {} watching", watching), 5.0f);
+	}
+}
+
+void Netplay::SpectateStatus(const std::string& text, float seconds)
+{
+	Host::AddIconOSDMessage(OSD_KEY, ICON_FA_EYE, text, seconds);
+}
+
+bool Netplay::SpectateBeforeExecute()
+{
+	if (!s_spec_need)
+		return true;
+
+	GgrsSpecStatusC st = {};
+	const int state = ggrs_spec_poll(s_spec, &st);
+	if (state == GGRS_SPEC_REJECTED)
+	{
+		char reason[256] = {};
+		ggrs_spec_reason(s_spec, reason, sizeof(reason));
+		Fail(fmt::format("the host turned the spectator away: {}", reason));
+		return true;
+	}
+	if (state == GGRS_SPEC_FULL)
+	{
+		Fail("the match already has four spectators");
+		return true;
+	}
+	if (state == GGRS_SPEC_TIMEOUT)
+	{
+		Fail((st.host_frames > 0) ? "lost the connection to the host" : "no answer from the host");
+		return true;
+	}
+
+	const int host_frames = static_cast<int>(st.host_frames);
+	const int behind = host_frames - s_spec_frame;
+	// Catching up (far behind): no frame limiter, no audio, only every 15th frame shown, until close to the
+	// match. Live: a small buffer, refilled after the frames ran out, so short network hiccups do not stutter
+	// every frame; a few frames too far behind, every third frame skips the limiter (about 1.5x speed).
+	if (behind > 120)
+		s_spec_live = false;
+	const bool catching_up = !s_spec_live && behind > 12;
+	if (!catching_up && s_spec_starved && !st.ended && st.buffered < 3)
+	{
+		Threading::Sleep(1);
+		return false;
+	}
+
+	std::array<Rollback::PadInput, NUM_PLAYERS> inputs;
+	bool has_sum = false;
+	u64 lo = 0, hi = 0;
+	if (!ggrs_spec_take(s_spec, static_cast<u32>(s_spec_frame), reinterpret_cast<u8*>(inputs.data()), &has_sum, &lo, &hi))
+	{
+		if (st.ended && s_spec_frame >= host_frames)
+		{
+			Console.WriteLn(fmt::format("Netplay: the spectated match ended at frame {}", s_spec_frame));
+			SpectateStatus("Spectator: the match has ended.", Host::OSD_INFO_DURATION);
+			Stop();
+			return true;
+		}
+		s_spec_starved = true;
+		if (s_spec_msg_timer.GetTimeSeconds() >= 1.0)
+		{
+			s_spec_msg_timer.Reset();
+			if (state == GGRS_SPEC_WAITING)
+				SpectateStatus("Spectator: waiting for the match to start ...", 2.0f);
+			else if (state == GGRS_SPEC_CONNECTING)
+				SpectateStatus(fmt::format("Spectator: connecting to {} ...", s_options.remote), 2.0f);
+		}
+		Threading::Sleep(1);
+		return false;
+	}
+	s_spec_starved = false;
+
+	// Sync check: the host's checksum of the state at the start of this frame.
+	if (has_sum)
+	{
+		if (!s_spec_snapshot)
+			s_spec_snapshot = std::make_unique<Rollback::Snapshot>();
+		Error error;
+		if (Rollback::Save(*s_spec_snapshot, &error))
+		{
+			const auto [my_lo, my_hi] = Checksum(*s_spec_snapshot, s_spec_frame);
+			s_spec_checks++;
+			if ((my_lo != lo || my_hi != hi) && !s_spec_desync_shown)
+			{
+				s_spec_desync_shown = true;
+				Console.Error(fmt::format("Netplay: SPECTATOR DESYNC at frame {}: host {:016x}{:016x}, here {:016x}{:016x}",
+					s_spec_frame, hi, lo, my_hi, my_lo));
+				LogDesyncMap(s_spec_frame);
+				Host::AddIconOSDMessage("NetplaySpecDesync", ICON_FA_TRIANGLE_EXCLAMATION,
+					"Spectator: this view is out of sync with the match (different BIOS or settings?).", 30.0f);
+			}
+			else if ((s_spec_checks % 10) == 1)
+			{
+				Console.WriteLn(fmt::format("Netplay: spectator in sync at frame {} ({} checks)", s_spec_frame, s_spec_checks));
+			}
+		}
+	}
+
+	ApplyFrameInputs(s_spec_frame, inputs);
+	Rollback::g_skip_throttle = catching_up || (behind > 10 && (s_spec_frame % 3) == 0);
+	Rollback::g_skip_audio = catching_up;
+	Rollback::g_skip_present = catching_up && (s_spec_frame % 15) != 0;
+
+	if (catching_up)
+	{
+		if (s_spec_msg_timer.GetTimeSeconds() >= 1.0)
+		{
+			s_spec_msg_timer.Reset();
+			const int pct = (host_frames > 0) ? (100 * s_spec_frame / host_frames) : 0;
+			SpectateStatus(fmt::format("Spectator: catching up with the match ... {} %", pct), 2.0f);
+		}
+	}
+	else if (!s_spec_live)
+	{
+		s_spec_live = true;
+		Console.WriteLn(fmt::format("Netplay: spectator caught up at frame {}", s_spec_frame));
+		SpectateStatus("Spectator: watching live.", 4.0f);
+	}
+
+	s_spec_frame++;
+	s_spec_need = false;
+	return true;
 }
 
 bool Netplay::StartRunAhead()

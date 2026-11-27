@@ -21,6 +21,9 @@ use ggrs::{
 };
 use serde::{Deserialize, Serialize};
 
+mod spectate;
+pub use spectate::*;
+
 /// Size of one player's input for one frame (Pad::FrameInput in the fork).
 pub const GGRS_INPUT_SIZE: usize = 18;
 
@@ -62,6 +65,8 @@ struct PeerSocket {
     placeholder: SocketAddr,
     /// Actual peer address; shared with the session so the caller can query it.
     peer: SharedAddr,
+    /// Spectators asking for frames on the same socket (see spectate.rs).
+    hub: Option<Rc<RefCell<SpecHub>>>,
 }
 
 fn bind_udp(port: u16) -> std::io::Result<UdpSocket> {
@@ -71,8 +76,8 @@ fn bind_udp(port: u16) -> std::io::Result<UdpSocket> {
 }
 
 impl PeerSocket {
-    fn new(socket: UdpSocket, placeholder: SocketAddr, peer: SharedAddr) -> Self {
-        Self { socket, buffer: Box::new([0; 4096]), placeholder, peer }
+    fn new(socket: UdpSocket, placeholder: SocketAddr, peer: SharedAddr, hub: Option<Rc<RefCell<SpecHub>>>) -> Self {
+        Self { socket, buffer: Box::new([0; 4096]), placeholder, peer, hub }
     }
 }
 
@@ -91,6 +96,14 @@ impl NonBlockingSocket<SocketAddr> for PeerSocket {
                 Ok((n, src)) => {
                     // Late session handshake packets (see GgrsNet) are not GGRS messages.
                     if self.buffer[..n].starts_with(HS_MAGIC) {
+                        continue;
+                    }
+                    // A spectator asking for frames.
+                    if self.buffer[..n].starts_with(SPEC_MAGIC) {
+                        if let Some(hub) = &self.hub {
+                            let packet = self.buffer[..n].to_vec();
+                            hub.borrow_mut().handle(src, &packet);
+                        }
                         continue;
                     }
                     // Packets come from the internet: decode with a size limit (same format as
@@ -133,6 +146,8 @@ pub struct GgrsSession {
     num_players: usize,
     requests: Vec<GgrsRequest<Cfg>>,
     events: VecDeque<GgrsEvent<Cfg>>,
+    /// Spectators (P2P sessions).
+    hub: Option<Rc<RefCell<SpecHub>>>,
 }
 
 thread_local! {
@@ -255,6 +270,7 @@ fn new_session(session: Session, num_players: usize) -> *mut GgrsSession {
         num_players,
         requests: Vec::new(),
         events: VecDeque::new(),
+        hub: None,
     }))
 }
 
@@ -304,6 +320,7 @@ fn start_p2p(cfg: &GgrsP2PConfig, socket: UdpSocket, peer: Option<SocketAddr>) -
     // GGRS identifies the peer by this address; the socket maps it to the actual one.
     let remote = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 1)), 1);
     let peer_addr: SharedAddr = Rc::new(Cell::new(peer));
+    let hub = Rc::new(RefCell::new(SpecHub::new(socket.try_clone().ok())));
 
     let num_players = cfg.num_players as usize;
     let build = || -> Result<P2PSession<Cfg>, String> {
@@ -326,14 +343,19 @@ fn start_p2p(cfg: &GgrsP2PConfig, socket: UdpSocket, peer: Option<SocketAddr>) -
                 if player == cfg.local_player as usize { PlayerType::Local } else { PlayerType::Remote(remote) };
             builder = builder.add_player(kind, player).map_err(|e| e.to_string())?;
         }
-        builder.start_p2p_session(PeerSocket::new(socket, remote, peer_addr.clone())).map_err(|e| e.to_string())
+        builder
+            .start_p2p_session(PeerSocket::new(socket, remote, peer_addr.clone(), Some(hub.clone())))
+            .map_err(|e| e.to_string())
     };
 
     match build() {
         Ok(session) => {
             let s = new_session(Session::P2P(session), num_players);
             // SAFETY: freshly allocated session.
-            unsafe { (*s).peer_addr = Some(peer_addr) };
+            unsafe {
+                (*s).peer_addr = Some(peer_addr);
+                (*s).hub = Some(hub);
+            }
             s
         }
         Err(e) => {
@@ -475,6 +497,13 @@ pub extern "C" fn ggrs_net_poll(
                 }
             };
             let packet = &buf[..n];
+            // A spectator before the match runs: tell it to wait (a tiny answer, see spectate.rs).
+            if packet.starts_with(SPEC_MAGIC) {
+                if net.is_host {
+                    let _ = socket.send_to(&wait_packet(), src);
+                }
+                continue;
+            }
             let is_hs = packet.len() >= 5 && packet.starts_with(HS_MAGIC);
             if net.is_host {
                 if is_hs && packet[4] == HS_HELLO && net.peer.is_none_or(|p| p == src) {
@@ -881,4 +910,64 @@ pub extern "C" fn ggrs_peer_address(s: *mut GgrsSession, buf: *mut c_char, buf_l
         }
     }
     text.len()
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Spectators, host side (see spectate.rs)
+// ---------------------------------------------------------------------------------------------------
+
+fn hub_of(s: *mut GgrsSession) -> Option<Rc<RefCell<SpecHub>>> {
+    handle(s).and_then(|h| h.hub.clone())
+}
+
+/// Program version spectators must match (any bytes, compared exactly).
+#[unsafe(no_mangle)]
+pub extern "C" fn ggrs_spec_host_version(s: *mut GgrsSession, version: *const u8, len: usize) {
+    let Some(hub) = hub_of(s) else { return };
+    if version.is_null() {
+        return;
+    }
+    // SAFETY: the caller provides len bytes.
+    hub.borrow_mut().set_version(unsafe { std::slice::from_raw_parts(version, len) });
+}
+
+/// Adds the confirmed inputs of `frame` (both players, SPEC_FRAME_BYTES bytes). Frames must come in order.
+/// Returns 0, or GGRS_ERR_OTHER on a gap or without spectator support.
+#[unsafe(no_mangle)]
+pub extern "C" fn ggrs_spec_host_push(s: *mut GgrsSession, frame: u32, inputs: *const u8) -> i32 {
+    let Some(hub) = hub_of(s) else { return GGRS_ERR_OTHER };
+    if inputs.is_null() {
+        return GGRS_ERR_OTHER;
+    }
+    let mut frame_inputs = [0u8; SPEC_FRAME_BYTES];
+    // SAFETY: the caller provides SPEC_FRAME_BYTES bytes.
+    unsafe { std::ptr::copy_nonoverlapping(inputs, frame_inputs.as_mut_ptr(), SPEC_FRAME_BYTES) };
+    if hub.borrow_mut().push(frame, &frame_inputs) {
+        0
+    } else {
+        set_error(format!("spectator frames out of order at {frame}"));
+        GGRS_ERR_OTHER
+    }
+}
+
+/// Checksum of the state at the start of `frame`, so spectators can check that they stay in sync.
+#[unsafe(no_mangle)]
+pub extern "C" fn ggrs_spec_host_checksum(s: *mut GgrsSession, frame: u32, lo: u64, hi: u64) {
+    if let Some(hub) = hub_of(s) {
+        hub.borrow_mut().set_checksum(frame, lo, hi);
+    }
+}
+
+/// Spectators heard from in the last seconds.
+#[unsafe(no_mangle)]
+pub extern "C" fn ggrs_spec_host_count(s: *mut GgrsSession) -> u32 {
+    hub_of(s).map_or(0, |hub| hub.borrow().active() as u32)
+}
+
+/// The match ends: tells the spectators (they play out what they have).
+#[unsafe(no_mangle)]
+pub extern "C" fn ggrs_spec_host_end(s: *mut GgrsSession) {
+    if let Some(hub) = hub_of(s) {
+        hub.borrow_mut().end();
+    }
 }
