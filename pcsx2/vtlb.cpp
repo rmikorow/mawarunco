@@ -1541,6 +1541,14 @@ PageFaultHandler::HandlerResult PageFaultHandler::HandlePageFault(void* exceptio
 // This does not clear any recompiler blocks.  It is assumed (and necessary) for the caller
 // to ensure the EErec is also reset in conjunction with calling this function.
 //  (this function is called by default from the eerecReset).
+bool mmap_RestoreWritePage(u32 offset)
+{
+	if (offset >= Ps2MemSize::ExposedRam || m_PageProtectInfo[offset >> __pageshift].Mode != ProtMode_Write)
+		return false;
+	mmap_ClearCpuBlock(offset);
+	return true;
+}
+
 void mmap_ResetBlockTracking()
 {
 	//DbgCon.WriteLn( "vtlb/mmap: Block Tracking reset..." );

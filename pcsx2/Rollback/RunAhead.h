@@ -12,10 +12,10 @@
 //
 // [EmuCore/Rollback] RunAhead = 0 (off), 1 (default) or 2 frames. Offline this module drives itself; during
 // netplay the netplay session uses the helpers below (and skips run-ahead in frames with a rollback).
-// If the work no longer fits into a frame for a while, run-ahead switches itself off.
+// If the work no longer fits into a frame for a while, run-ahead pauses and comes back by itself.
 namespace RunAhead
 {
-	/// Configured number of frames (0 = off), after the automatic switch-off.
+	/// Configured number of frames (0 = off or paused over the budget).
 	u32 Frames();
 
 	/// Offline driver: true while run-ahead runs without netplay.

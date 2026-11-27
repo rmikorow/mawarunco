@@ -231,6 +231,10 @@ enum vtlb_ProtectionMode
 extern vtlb_ProtectionMode mmap_GetRamPageInfo(u32 paddr);
 extern void mmap_MarkCountedRamPage(u32 paddr);
 extern void mmap_ResetBlockTracking();
+// Rollback fork: a savestate restore is about to overwrite a RAM page. Same as a guest write to it: a
+// write-protected code page drops its blocks and goes to manual protection. Returns false if the page had
+// no unchecked code (manual pages check their blocks on entry, other pages hold no code).
+extern bool mmap_RestoreWritePage(u32 offset);
 
 // --------------------------------------------------------------------------------------
 //  Goemon game fix

@@ -57,6 +57,7 @@ bool g_SaveStateExactRestore = false;
 static constexpr u32 RESTORE_PAGE_SIZE = 0x1000;
 static bool s_restore_clear_iop_code = true;
 static bool s_restore_clear_ee_code = true;
+static bool s_restore_keep_checked_code = true;
 
 static void PreLoadPrep(bool clear_cpu_caches = true)
 {
@@ -605,16 +606,26 @@ public:
 		if (!s_incremental_ram_restore || src.size() != GetDataSize())
 			return MemorySavestateEntry::FreezeInMem(src);
 
-		// Rollback fork: only touch pages that changed and drop the compiled code in them. Writing to
-		// a write-protected code page also faults into the mmap handler, which clears it as well.
+		// Rollback fork: only touch pages that changed. A changed page is handled like a guest write to it:
+		// a write-protected code page drops its blocks once and goes to manual protection, where every
+		// block compares its code with RAM on entry. Dropping the code of every changed page on every
+		// restore instead (the old way) recompiles code that did not change: games that keep data next to
+		// code (Fate/unlimited codes) filled the 64 MB code buffer every few minutes, and the recompiler
+		// reset cost a 85-160 ms frame. (Found by a tester porting the rollback core to KOF XI.)
 		u8* const dst = GetDataPtr();
 		for (u32 off = 0; off < GetDataSize(); off += RESTORE_PAGE_SIZE)
 		{
 			if (std::memcmp(dst + off, src.data() + off, RESTORE_PAGE_SIZE) == 0)
 				continue;
-			// Diagnostics: [EmuCore/Rollback] RestoreClearEECode = false keeps EE code in changed pages.
+			// [EmuCore/Rollback] RestoreKeepCheckedCode = false: the old way. RestoreClearEECode = false
+			// (diagnostics): keep all EE code.
 			if (s_restore_clear_ee_code)
-				Cpu->Clear(off, RESTORE_PAGE_SIZE / 4);
+			{
+				if (s_restore_keep_checked_code)
+					mmap_RestoreWritePage(off);
+				else
+					Cpu->Clear(off, RESTORE_PAGE_SIZE / 4);
+			}
 			std::memcpy(dst + off, src.data() + off, RESTORE_PAGE_SIZE);
 		}
 		return true;
@@ -1406,6 +1417,7 @@ bool SaveState_LoadFromMemory(const ArchiveEntryList& list, Error* error, bool c
 	s_incremental_ram_restore = !clear_cpu_caches;
 	s_restore_clear_iop_code = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "RestoreClearIOPCode", true);
 	s_restore_clear_ee_code = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "RestoreClearEECode", true);
+	s_restore_keep_checked_code = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "RestoreKeepCheckedCode", true);
 	if (!clear_cpu_caches && !s_restore_clear_ee_code)
 	{
 		// Diagnostics: drop the write protection so restoring RAM does not fault into the mmap handler

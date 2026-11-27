@@ -1,5 +1,7 @@
 # Soak test before a release: runs the game for a few minutes in the modes players use and checks the
-# performance report (logs\perf-*.txt) for memory growth and frames that get slower over time.
+# performance report (logs\perf-*.txt) for memory growth and frames that get slower over time, and the
+# log for EE recompiler resets after boot (a full code buffer: one 85-160 ms frame; with the old restore
+# Fate/unlimited codes hit one every 3-4 minutes, so run 10 minutes to check that).
 #
 #   .\tools\rollback\perf-soak.ps1 -Iso <path to your disc image> [-Minutes 4]
 #
@@ -64,7 +66,19 @@ function Invoke-Soak([string]$name, [string[]]$arguments) {
     Write-Host ('   memory {0:N0} -> {1:N0} MB, trend {2:+0.0;-0.0} MB/min' -f $late[0].Mem, $late[-1].Mem, $slope)
     Write-Host ('   frame work {0:N2} ms early, {1:N2} ms late; {2} stutters' -f $early, $last, $stutters)
     Write-Host "   report: $($report.Name)"
+
+    # Recompiler resets after boot (the first ones come from the BIOS and the game starting).
+    $resets = 0; $pauses = 0
+    $log = Join-Path $logs 'emulog.txt'
+    if (Test-Path $log) {
+        foreach ($line in Get-Content $log) {
+            if ($line -match '^\[\s*(\d+)[,.]\d+\] EE/iR5900 Recompiler Reset' -and [int]$Matches[1] -ge 30) { $resets++ }
+            if ($line -match 'Run-ahead: over the frame budget') { $pauses++ }
+        }
+    }
+    Write-Host ('   recompiler resets after boot: {0}; run-ahead budget pauses: {1}' -f $resets, $pauses)
     $ok = $true
+    if ($resets -gt 0) { Write-Host '   FAIL: EE recompiler reset during play (code buffer full)'; $ok = $false }
     if ($slope -gt $MaxMemoryMBPerMinute) { Write-Host '   FAIL: memory keeps growing'; $ok = $false }
     if ($last - $early -gt $MaxWorkRiseMs) { Write-Host '   FAIL: frames get slower over time'; $ok = $false }
     if ($ok) { Write-Host '   ok' }

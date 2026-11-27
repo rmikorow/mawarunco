@@ -9,6 +9,7 @@
 #include "Rollback/Rollback.h"
 #include "Rollback/RollbackTest.h"
 
+#include "Counters.h"
 #include "Host.h"
 #include "IconsFontAwesome.h"
 #include "Input/InputManager.h"
@@ -47,6 +48,20 @@ namespace RunAhead
 	static double s_work_sum_ms = 0.0;
 	static double s_work_max_ms = 0.0;
 
+	// Over budget: run-ahead pauses and comes back by itself. A pause within PAUSE_REPEAT frames of the
+	// last resume doubles the wait, up to PAUSE_MAX; only then the player gets a message. Short heavy
+	// scenes (the fade back from Archer's UBW, ~2 s over budget) used to switch it off for the session.
+	// [EmuCore/Rollback] BudgetPause = false: never pause.
+	static constexpr u32 PAUSE_FIRST = 300;
+	static constexpr u32 PAUSE_MAX = 4800;
+	static constexpr u32 PAUSE_REPEAT = 1800;
+	static bool s_budget_pause = true;
+	static bool s_paused = false;
+	static u32 s_pause_wait = 0;
+	static uint s_pause_start = 0;  // g_FrameCount when the pause began
+	static uint s_resumed_at = 0;   // g_FrameCount of the last resume
+	static bool s_resumed_once = false;
+
 	static void Init()
 	{
 		if (s_init)
@@ -56,6 +71,42 @@ namespace RunAhead
 		s_frames = static_cast<u32>(std::clamp(Host::GetBaseIntSettingValue("EmuCore/Rollback", "RunAhead", 1), 0, 2));
 		if (s_frames > 0)
 			Console.WriteLn(fmt::format("Run-ahead: {} frame(s)", s_frames));
+		s_budget_pause = Host::GetBaseBoolSettingValue("EmuCore/Rollback", "BudgetPause", true);
+	}
+
+	/// Over budget: pause for a while (see PAUSE_FIRST).
+	static void Pause()
+	{
+		const uint now = g_FrameCount;
+		const bool again = s_resumed_once && (now - s_resumed_at) < PAUSE_REPEAT;
+		s_pause_wait = again ? std::min(s_pause_wait * 2, PAUSE_MAX) : PAUSE_FIRST;
+		s_paused = true;
+		s_pause_start = now;
+		s_over_budget = 0;
+		Console.Warning(fmt::format("Run-ahead: over the frame budget, paused for {} frames", s_pause_wait));
+		if (s_pause_wait >= PAUSE_MAX)
+		{
+			Host::AddIconOSDMessage("RunAhead", ICON_FA_TRIANGLE_EXCLAMATION,
+				"Run-ahead keeps pausing: this PC often needs more than a frame for it.", Host::OSD_WARNING_DURATION);
+		}
+	}
+
+	/// Ends a pause when its time is up.
+	static void UpdatePause()
+	{
+		if (!s_paused)
+			return;
+		const uint now = g_FrameCount;
+		// A state load can move the frame counter back: count the pause from there.
+		if (now < s_pause_start)
+			s_pause_start = now;
+		if (now - s_pause_start < s_pause_wait)
+			return;
+		s_paused = false;
+		s_resumed_at = now;
+		s_resumed_once = true;
+		s_over_budget = 0;
+		Console.WriteLn("Run-ahead: resumed");
 	}
 
 	static void Disable(const char* reason)
@@ -64,13 +115,15 @@ namespace RunAhead
 		Host::AddIconOSDMessage("RunAhead", ICON_FA_TRIANGLE_EXCLAMATION,
 			fmt::format("Run-ahead switched off: {}", reason), Host::OSD_WARNING_DURATION);
 		s_frames = 0;
+		s_paused = false;
 	}
 } // namespace RunAhead
 
 u32 RunAhead::Frames()
 {
 	Init();
-	return s_frames;
+	UpdatePause();
+	return s_paused ? 0 : s_frames;
 }
 
 void RunAhead::BeginRealFrame()
@@ -113,7 +166,12 @@ void RunAhead::EndCycle()
 		s_work_max_ms = 0.0;
 	}
 	if (s_over_budget >= 60)
-		Disable("this PC needs more than a frame for it");
+	{
+		if (s_budget_pause)
+			Pause();
+		else
+			Disable("this PC needs more than a frame for it");
+	}
 
 	// Sleep until the frame is due, then read the host input as late as possible.
 	VMManager::Internal::Throttle();
@@ -138,9 +196,8 @@ static bool MemoryCardsInUse()
 
 bool RunAhead::IsActive()
 {
-	Init();
 	// Netplay drives run-ahead itself; the self-test and the latency measurement need plain frames.
-	if (s_frames == 0 || Netplay::IsActive() || BootShortcut::IsActive() || RollbackTest::IsBusy() ||
+	if (Frames() == 0 || Netplay::IsActive() || BootShortcut::IsActive() || RollbackTest::IsBusy() ||
 		LatencyTest::IsActive())
 	{
 		return false;
